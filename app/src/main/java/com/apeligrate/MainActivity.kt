@@ -1,6 +1,7 @@
 package com.apeligrate
 
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -33,63 +34,89 @@ import com.apeligrate.ui.theme.SafeGreen
 import com.apeligrate.ui.theme.WarningAmber
 import com.apeligrate.ui.viewmodel.MainViewModel
 
-import com.apeligrate.data.repository.MockAuthRepository
 import com.apeligrate.domain.use_case.PerformLoginUseCase
 import com.apeligrate.domain.use_case.RegisterUserUseCase
 import com.apeligrate.ui.screens.LoginScreen
 import com.apeligrate.ui.screens.RegisterScreen
 import com.apeligrate.ui.screens.ReportScreen
+import com.apeligrate.ui.screens.SplashScreen
 import com.apeligrate.ui.viewmodel.LoginViewModel
 import com.apeligrate.ui.viewmodel.RegisterViewModel
 
+private const val TAG = "MainActivity"
+
 class MainActivity : ComponentActivity() {
-    private val authRepository = MockAuthRepository()
-    private val loginUseCase = PerformLoginUseCase(authRepository)
-    private val registerUseCase = RegisterUserUseCase(authRepository)
+    // SessionManager + RemoteAuthRepository
+    private val sessionManager by lazy { com.apeligrate.data.local.SessionManager(this.applicationContext) }
+    private val authRepository by lazy { com.apeligrate.data.repository.RemoteAuthRepository(sessionManager) }
+    private val loginUseCase by lazy { PerformLoginUseCase(authRepository) }
+    private val registerUseCase by lazy { RegisterUserUseCase(authRepository) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             ApeligrateTheme {
-                var currentScreen by remember { mutableStateOf("login") }
+                val isLoggedIn by sessionManager.isLoggedInFlow.collectAsState(initial = null)
+                var currentScreen by remember { mutableStateOf<String?>(null) }
                 var selectedTab by remember { mutableStateOf(SentinelTab.INICIO) }
 
-                when (currentScreen) {
-                    "login" -> {
-                        val viewModel = remember { LoginViewModel(loginUseCase) }
-                        LoginScreen(
-                            viewModel = viewModel,
-                            onRegisterClick = { currentScreen = "register" },
-                            onLoginSuccess = { currentScreen = "main" },
-                        )
+                LaunchedEffect(isLoggedIn) {
+                    if (isLoggedIn != null) {
+                        Log.d(TAG, "Session state determined: isLoggedIn=$isLoggedIn")
+                        if (currentScreen == null) {
+                            // First time: initialize based on login state
+                            currentScreen = if (isLoggedIn == true) "main" else "login"
+                            Log.d(TAG, "Navigating to: $currentScreen")
+                        } else if (isLoggedIn == false && currentScreen != "login") {
+                            // Logout occurred: back to login
+                            Log.d(TAG, "User logged out. Navigating to login")
+                            currentScreen = "login"
+                        }
                     }
-                    "register" -> {
-                        val viewModel = remember { RegisterViewModel(registerUseCase) }
-                        RegisterScreen(
-                            viewModel = viewModel,
-                            onLoginClick = { currentScreen = "login" },
-                            onRegisterSuccess = { currentScreen = "main" }
-                        )
-                    }
-                    "main" -> {
-                        SentinelBackground {
-                            Scaffold(
-                                modifier = Modifier.fillMaxSize(),
-                                containerColor = Color.Transparent,
-                                topBar = { SentinelTopBar() },
-                                bottomBar = {
-                                    SentinelBottomBar(
-                                        selectedTab = selectedTab,
-                                        onTabSelected = { selectedTab = it }
-                                    )
-                                }
-                            ) { innerPadding ->
-                                Box(modifier = Modifier.padding(innerPadding)) {
-                                    when (selectedTab) {
-                                        SentinelTab.INICIO -> MainScreen()
-                                        SentinelTab.REPORTAR -> ReportScreen()
-                                        else -> PlaceholderScreen(selectedTab.name)
+                }
+
+                if (currentScreen == null) {
+                    // Show splash while determining session state
+                    Log.d(TAG, "Loading session state...")
+                    SplashScreen()
+                } else {
+                    when (currentScreen) {
+                        "login" -> {
+                            val viewModel = remember { LoginViewModel(loginUseCase) }
+                            LoginScreen(
+                                viewModel = viewModel,
+                                onRegisterClick = { currentScreen = "register" },
+                                onLoginSuccess = { currentScreen = "main" },
+                            )
+                        }
+                        "register" -> {
+                            val viewModel = remember { RegisterViewModel(registerUseCase) }
+                            RegisterScreen(
+                                viewModel = viewModel,
+                                onLoginClick = { currentScreen = "login" },
+                                onRegisterSuccess = { currentScreen = "main" }
+                            )
+                        }
+                        "main" -> {
+                            SentinelBackground {
+                                Scaffold(
+                                    modifier = Modifier.fillMaxSize(),
+                                    containerColor = Color.Transparent,
+                                    topBar = { SentinelTopBar() },
+                                    bottomBar = {
+                                        SentinelBottomBar(
+                                            selectedTab = selectedTab,
+                                            onTabSelected = { selectedTab = it }
+                                        )
+                                    }
+                                ) { innerPadding ->
+                                    Box(modifier = Modifier.padding(innerPadding)) {
+                                        when (selectedTab) {
+                                            SentinelTab.INICIO -> MainScreen()
+                                            SentinelTab.REPORTAR -> ReportScreen()
+                                            else -> PlaceholderScreen(selectedTab.name)
+                                        }
                                     }
                                 }
                             }
