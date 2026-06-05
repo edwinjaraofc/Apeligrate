@@ -7,6 +7,7 @@ import retrofit2.http.GET
 import retrofit2.http.Query
 import retrofit2.http.POST
 import retrofit2.http.Body
+import retrofit2.http.Headers
 
 /**
  * ORDS response for listing users: contains an `items` array
@@ -35,9 +36,14 @@ interface SentinelApiService {
     suspend fun login(credentials: AuthCredentials): User
     suspend fun getAlerts(): List<Alert>
 
-    @GET("admin/users/")
-    suspend fun queryUsers(@Query("q") q: String): OrdsUsersResponse
+    @GET("users")
+    suspend fun queryUsers(
+        @Query("select") select: String = "*",
+        @Query("email") email: String,
+        @Query("password_hash") passwordHash: String,
+    ): List<Map<String, Any>>
 
-    @POST("admin/users/")
-    suspend fun createUser(@Body body: CreateUserRequest): CreateUserResponse
+    @Headers("Prefer: return=representation")
+    @POST("users")
+    suspend fun createUser(@Body body: CreateUserRequest): List<Map<String, Any>>
 }

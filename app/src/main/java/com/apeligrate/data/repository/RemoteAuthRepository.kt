@@ -1,13 +1,12 @@
 package com.apeligrate.data.repository
 
 import android.util.Log
+import com.apeligrate.data.remote.BackendConfig
 import com.apeligrate.data.remote.SentinelApiService
-import com.apeligrate.data.remote.OrdsUsersResponse
 import com.apeligrate.domain.model.AuthCredentials
 import com.apeligrate.domain.model.User
 import com.apeligrate.domain.repository.AuthRepository
 import com.apeligrate.data.local.SessionManager
-import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,10 +27,19 @@ class RemoteAuthRepository(private val sessionManager: SessionManager) : AuthRep
     // Build Retrofit
     private val api: SentinelApiService by lazy {
         val logging = HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC }
-        val client = OkHttpClient.Builder().addInterceptor(logging).build()
+        val client = OkHttpClient.Builder()
+            .addInterceptor(logging)
+            .addInterceptor { chain ->
+                val request = chain.request().newBuilder()
+                    .header("apikey", BackendConfig.SUPABASE_ANON_KEY)
+                    .header("Authorization", "Bearer ${BackendConfig.SUPABASE_ANON_KEY}")
+                    .build()
+                chain.proceed(request)
+            }
+            .build()
 
         Retrofit.Builder()
-            .baseUrl("https://gb72d0482c8537e-upchmovilbb2026.adb.us-phoenix-1.oraclecloudapps.com/ords/")
+            .baseUrl(BackendConfig.API_BASE_URL)
             .client(client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
@@ -41,23 +49,22 @@ class RemoteAuthRepository(private val sessionManager: SessionManager) : AuthRep
     override suspend fun login(credentials: AuthCredentials): Result<User> = withContext(Dispatchers.IO) {
         try {
             val passwordHash = hashPassword(credentials.password)
-            val qObj = mapOf("email" to credentials.email, "password_hash" to passwordHash)
-            val qJson = Gson().toJson(qObj)
+            val users = api.queryUsers(
+                email = "eq.${credentials.email}",
+                passwordHash = "eq.$passwordHash",
+            )
 
-            val response: OrdsUsersResponse = api.queryUsers(qJson)
-
-            val items = response.items
-            if (items.isNotEmpty()) {
-                val first = items[0]
-                val id = first["id"]?.toString() ?: first["ID"]?.toString() ?: credentials.email
+            if (users.isNotEmpty()) {
+                val first = users[0]
+                val id = first["id"]?.toString() ?: credentials.email
                 Log.d(TAG, "Login successful. Extracted id: $id")
                 Log.d(TAG, "Saving session with userId: $id")
                 sessionManager.setSession(id)
                 Log.d(TAG, "Session saved successfully")
 
-                val name = first["name"]?.toString() ?: first["NAME"]?.toString() ?: ""
-                val email = first["email"]?.toString() ?: first["EMAIL"]?.toString() ?: credentials.email
-                val profile = first["profile_image_url"]?.toString() ?: first["PROFILE_IMAGE_URL"]?.toString()
+                val name = first["name"]?.toString() ?: ""
+                val email = first["email"]?.toString() ?: credentials.email
+                val profile = first["profile_image_url"]?.toString()
 
                 val user = User(id = id, name = if (name.isNotBlank()) name else "Usuario", email = email, profileImageUrl = profile)
                 _currentUser.value = user
@@ -84,18 +91,21 @@ class RemoteAuthRepository(private val sessionManager: SessionManager) : AuthRep
                 )
 
                 Log.d(TAG, "Sending register request for email: ${credentials.email}")
-                val response: com.apeligrate.data.remote.CreateUserResponse = api.createUser(request)
+                val response = api.createUser(request)
+                if (response.isEmpty()) {
+                    return@withContext Result.failure(Exception("Usuario no creado"))
+                }
 
-                // Try to extract id/name/email/profile from response map
-                val id = response["id"]?.toString() ?: response["ID"]?.toString() ?: credentials.email
+                val created = response[0]
+                val id = created["id"]?.toString() ?: credentials.email
                 Log.d(TAG, "Register successful. Extracted id: $id")
                 Log.d(TAG, "Saving session with userId: $id")
                 sessionManager.setSession(id)
                 Log.d(TAG, "Session saved successfully")
 
-                val respName = response["name"]?.toString() ?: response["NAME"]?.toString() ?: name
-                val respEmail = response["email"]?.toString() ?: response["EMAIL"]?.toString() ?: credentials.email
-                val profile = response["profile_image_url"]?.toString() ?: response["PROFILE_IMAGE_URL"]?.toString() ?: credentials.profileImageUrl
+                val respName = created["name"]?.toString() ?: name
+                val respEmail = created["email"]?.toString() ?: credentials.email
+                val profile = created["profile_image_url"]?.toString() ?: credentials.profileImageUrl
 
                 val user = User(id = id, name = respName, email = respEmail, profileImageUrl = profile)
                 _currentUser.value = user

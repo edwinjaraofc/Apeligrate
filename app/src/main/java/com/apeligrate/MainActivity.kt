@@ -6,12 +6,16 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -22,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.launch
 import com.apeligrate.domain.model.Alert
 import com.apeligrate.domain.model.Severity
 import com.apeligrate.ui.components.SentinelBackground
@@ -60,6 +65,7 @@ class MainActivity : ComponentActivity() {
                 val isLoggedIn by sessionManager.isLoggedInFlow.collectAsState(initial = null)
                 var currentScreen by remember { mutableStateOf<String?>(null) }
                 var selectedTab by remember { mutableStateOf(SentinelTab.INICIO) }
+                val coroutineScope = rememberCoroutineScope()
 
                 LaunchedEffect(isLoggedIn) {
                     if (isLoggedIn != null) {
@@ -103,7 +109,16 @@ class MainActivity : ComponentActivity() {
                                 Scaffold(
                                     modifier = Modifier.fillMaxSize(),
                                     containerColor = Color.Transparent,
-                                    topBar = { SentinelTopBar() },
+                                    topBar = {
+                                        SentinelTopBar(
+                                            onLogoutClick = {
+                                                coroutineScope.launch {
+                                                    authRepository.logout()
+                                                    selectedTab = SentinelTab.INICIO
+                                                }
+                                            }
+                                        )
+                                    },
                                     bottomBar = {
                                         SentinelBottomBar(
                                             selectedTab = selectedTab,
@@ -129,7 +144,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun SentinelTopBar() {
+fun SentinelTopBar(onLogoutClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -150,12 +165,29 @@ fun SentinelTopBar() {
                 fontWeight = FontWeight.ExtraBold
             )
         }
-        Box(
+        Row(
             modifier = Modifier
-                .size(32.dp)
-                .clip(CircleShape)
-                .background(Color.Gray)
-        )
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color(0x33FF4D4D))
+                .border(1.dp, Color(0x55FF6B6B), RoundedCornerShape(999.dp))
+                .clickable(onClick = onLogoutClick)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Default.Logout,
+                contentDescription = "Cerrar sesión",
+                tint = Color(0xFFFFB3B3),
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = "Salir",
+                color = Color(0xFFFFD6D6),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
     }
 }
 
