@@ -36,6 +36,12 @@ class LoginViewModel(
         val email = _uiState.value.email
         val password = _uiState.value.password
 
+        // Bypass for testing purposes
+        if (email == "1" && password == "1") {
+            _uiState.value = _uiState.value.copy(isLoginSuccess = true)
+            return
+        }
+
         if (email.isBlank() || password.isBlank()) {
             _uiState.value = _uiState.value.copy(error = "Por favor completa todos los campos")
             return

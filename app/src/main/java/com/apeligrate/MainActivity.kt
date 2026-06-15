@@ -41,19 +41,24 @@ import com.apeligrate.ui.viewmodel.MainViewModel
 
 import com.apeligrate.domain.use_case.PerformLoginUseCase
 import com.apeligrate.domain.use_case.RegisterUserUseCase
+import com.apeligrate.ui.screens.FeedScreen
 import com.apeligrate.ui.screens.LoginScreen
+import com.apeligrate.ui.screens.ProfileScreen
 import com.apeligrate.ui.screens.RegisterScreen
 import com.apeligrate.ui.screens.ReportScreen
 import com.apeligrate.ui.screens.SplashScreen
+import com.apeligrate.ui.viewmodel.FeedViewModel
 import com.apeligrate.ui.viewmodel.LoginViewModel
 import com.apeligrate.ui.viewmodel.RegisterViewModel
 
 private const val TAG = "MainActivity"
 
 class MainActivity : ComponentActivity() {
-    // SessionManager + RemoteAuthRepository
+    // SessionManager + Repositories
     private val sessionManager by lazy { com.apeligrate.data.local.SessionManager(this.applicationContext) }
     private val authRepository by lazy { com.apeligrate.data.repository.RemoteAuthRepository(sessionManager) }
+    private val incidentRepository by lazy { com.apeligrate.data.repository.IncidentReportRepositoryImpl() }
+    
     private val loginUseCase by lazy { PerformLoginUseCase(authRepository) }
     private val registerUseCase by lazy { RegisterUserUseCase(authRepository) }
 
@@ -71,20 +76,14 @@ class MainActivity : ComponentActivity() {
                     if (isLoggedIn != null) {
                         Log.d(TAG, "Session state determined: isLoggedIn=$isLoggedIn")
                         if (currentScreen == null) {
-                            // First time: initialize based on login state
                             currentScreen = if (isLoggedIn == true) "main" else "login"
-                            Log.d(TAG, "Navigating to: $currentScreen")
                         } else if (isLoggedIn == false && currentScreen != "login") {
-                            // Logout occurred: back to login
-                            Log.d(TAG, "User logged out. Navigating to login")
                             currentScreen = "login"
                         }
                     }
                 }
 
                 if (currentScreen == null) {
-                    // Show splash while determining session state
-                    Log.d(TAG, "Loading session state...")
                     SplashScreen()
                 } else {
                     when (currentScreen) {
@@ -129,8 +128,12 @@ class MainActivity : ComponentActivity() {
                                     Box(modifier = Modifier.padding(innerPadding)) {
                                         when (selectedTab) {
                                             SentinelTab.INICIO -> MainScreen()
+                                            SentinelTab.FEED -> {
+                                                val feedViewModel = remember { FeedViewModel(incidentRepository) }
+                                                FeedScreen(viewModel = feedViewModel)
+                                            }
                                             SentinelTab.REPORTAR -> ReportScreen()
-                                            else -> PlaceholderScreen(selectedTab.name)
+                                            SentinelTab.PERFIL -> ProfileScreen()
                                         }
                                     }
                                 }
@@ -188,13 +191,6 @@ fun SentinelTopBar(onLogoutClick: () -> Unit) {
                 fontWeight = FontWeight.SemiBold,
             )
         }
-    }
-}
-
-@Composable
-fun PlaceholderScreen(name: String) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(text = "Pantalla de $name en desarrollo", color = Color.White)
     }
 }
 

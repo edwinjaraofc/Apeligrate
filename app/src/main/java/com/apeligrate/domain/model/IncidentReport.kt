@@ -10,6 +10,11 @@ data class IncidentReport(
     val isAnonymous: Boolean = false,
     val reportedAt: Long = System.currentTimeMillis(),
     val userId: String? = null,
-    val status: String = "pending"
+    val status: String = "pending",
+    val images: List<String> = emptyList(),
+    
+    // Feed specifics
+    val validationCount: Int = 0,
+    val falseCount: Int = 0,
+    val persistenceMessage: String = "" // e.g., "42 reportes similares"
 )
-
