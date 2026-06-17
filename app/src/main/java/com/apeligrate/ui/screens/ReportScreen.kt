@@ -1,5 +1,6 @@
 package com.apeligrate.ui.screens
 
+import android.Manifest
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -9,8 +10,19 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -20,9 +32,42 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,6 +80,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.apeligrate.data.local.DeviceCoordinates
+import com.apeligrate.data.local.DeviceLocationProvider
+import com.apeligrate.data.local.SessionManager
+import com.apeligrate.domain.repository.IncidentReportRepository
+import com.apeligrate.domain.use_case.SubmitIncidentReportUseCase
 import com.apeligrate.ui.components.GlassPanel
 import com.apeligrate.ui.components.TactileButton
 import com.apeligrate.ui.theme.PrimaryContainer
@@ -45,27 +95,72 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ReportScreen() {
+fun ReportScreen(
+    repository: IncidentReportRepository,
+    onReportSubmitted: () -> Unit = {}
+) {
     val context = LocalContext.current
-    
-    // ViewModel initialization (simplified for this context)
-    val reportViewModel = remember {
-        val repository = com.apeligrate.data.repository.IncidentReportRepositoryImpl()
-        val useCase = com.apeligrate.domain.use_case.SubmitIncidentReportUseCase(repository)
+    val sessionManager = remember(context) { SessionManager(context) }
+    val userId by sessionManager.userIdFlow.collectAsState(initial = null)
+    val locationProvider = remember(context) { DeviceLocationProvider(context) }
+    var deviceCoordinates by remember { mutableStateOf<DeviceCoordinates?>(null) }
+    var locationStatus by remember { mutableStateOf("Intentando detectar tu ubicacion...") }
+
+    val reportViewModel = remember(repository) {
+        val useCase = SubmitIncidentReportUseCase(repository)
         ReportViewModel(useCase)
     }
-    
+
     val uiState by reportViewModel.uiState.collectAsState()
     val scrollState = rememberScrollState()
-    
-    // Image Picker Launcher
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+
+        if (granted) {
+            locationProvider.getCurrentCoordinates { coordinates ->
+                deviceCoordinates = coordinates
+                locationStatus = if (coordinates != null) {
+                    "Ubicacion lista para adjuntar al reporte."
+                } else {
+                    "No se pudo obtener la ubicacion actual."
+                }
+            }
+        } else {
+            locationStatus = "Sin permiso de ubicacion. El reporte se enviara sin coordenadas."
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (locationProvider.hasLocationPermission()) {
+            locationProvider.getCurrentCoordinates { coordinates ->
+                deviceCoordinates = coordinates
+                locationStatus = if (coordinates != null) {
+                    "Ubicacion lista para adjuntar al reporte."
+                } else {
+                    "No se pudo obtener la ubicacion actual."
+                }
+            }
+        } else {
+            locationPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
+    }
+
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia(5),
         onResult = { uris -> reportViewModel.addImages(uris) }
     )
 
-    // State for temporary UI elements
     var dateText by remember { mutableStateOf("") }
     var timeText by remember { mutableStateOf("") }
     var confirmData by remember { mutableStateOf(false) }
@@ -75,14 +170,14 @@ fun ReportScreen() {
     var selectedHour by remember { mutableStateOf(Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) }
     var selectedMinute by remember { mutableStateOf(Calendar.getInstance().get(Calendar.MINUTE)) }
 
-    // Observers
     LaunchedEffect(uiState.isSuccess) {
         if (uiState.isSuccess) {
-            Toast.makeText(context, "¡Reporte enviado exitosamente!", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "Reporte enviado exitosamente", Toast.LENGTH_LONG).show()
             confirmData = false
             dateText = ""
             timeText = ""
             reportViewModel.resetState()
+            onReportSubmitted()
         }
     }
 
@@ -97,7 +192,7 @@ fun ReportScreen() {
         ReportCategory("Hurto/Arrebato", Icons.Default.Security, Secondary),
         ReportCategory("Acoso", Icons.Default.Person, Tertiary),
         ReportCategory("Zona peligrosa", Icons.Default.LocationOn, Secondary),
-        ReportCategory("Calle sin iluminación", Icons.Default.MyLocation, MaterialTheme.colorScheme.onSurfaceVariant, isFullWidth = true)
+        ReportCategory("Calle sin iluminacion", Icons.Default.MyLocation, MaterialTheme.colorScheme.onSurfaceVariant, isFullWidth = true)
     )
 
     Column(
@@ -136,7 +231,7 @@ fun ReportScreen() {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        SectionLabel(title = "EVIDENCIA VISUAL (MÁX. 5)")
+        SectionLabel(title = "EVIDENCIA VISUAL (MAX. 5)")
         Spacer(modifier = Modifier.height(12.dp))
         ImageSelectionSection(
             selectedImages = uiState.selectedImages,
@@ -156,16 +251,16 @@ fun ReportScreen() {
             ReportTextField(
                 value = uiState.description,
                 onValueChange = { reportViewModel.onDescriptionChange(it) },
-                placeholder = "Describe qué pasó, cómo eran los involucrados, etc...",
+                placeholder = "Describe que paso, como eran los involucrados, etc...",
                 minHeight = 120.dp,
             )
         }
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        SectionLabel(title = "UBICACIÓN")
+        SectionLabel(title = "UBICACION")
         Spacer(modifier = Modifier.height(12.dp))
-        LocationPreview()
+        LocationPreview(deviceCoordinates = deviceCoordinates, locationStatus = locationStatus)
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -204,7 +299,7 @@ fun ReportScreen() {
                     Icon(Icons.Default.VisibilityOff, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
-                        Text("Reporte Anónimo", style = MaterialTheme.typography.labelLarge, color = Color.White)
+                        Text("Reporte anonimo", style = MaterialTheme.typography.labelLarge, color = Color.White)
                         Text("Oculta tu nombre de otros usuarios", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -220,7 +315,9 @@ fun ReportScreen() {
 
         Row(
             verticalAlignment = Alignment.Top,
-            modifier = Modifier.clickable { confirmData = !confirmData }.padding(vertical = 8.dp)
+            modifier = Modifier
+                .clickable { confirmData = !confirmData }
+                .padding(vertical = 8.dp)
         ) {
             Checkbox(
                 checked = confirmData,
@@ -229,7 +326,7 @@ fun ReportScreen() {
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "Certifico que la información es verídica y entiendo que el mal uso del sistema puede ser sancionado.",
+                text = "Certifico que la informacion es veridica y entiendo que el mal uso del sistema puede ser sancionado.",
                 style = MaterialTheme.typography.labelMedium,
                 color = Color.White.copy(alpha = 0.7f),
                 lineHeight = 18.sp
@@ -240,14 +337,24 @@ fun ReportScreen() {
 
         TactileButton(
             text = if (uiState.isLoading) "Enviando..." else "Enviar Reporte",
-            onClick = { if (confirmData) reportViewModel.submitReport() else Toast.makeText(context, "Confirma los datos", Toast.LENGTH_SHORT).show() },
+            onClick = {
+                if (confirmData) {
+                    reportViewModel.submitReport(
+                        userId = userId,
+                        latitude = deviceCoordinates?.latitude,
+                        longitude = deviceCoordinates?.longitude,
+                        address = null
+                    )
+                } else {
+                    Toast.makeText(context, "Confirma los datos", Toast.LENGTH_SHORT).show()
+                }
+            },
             icon = if (uiState.isLoading) null else Icons.AutoMirrored.Filled.Send,
             modifier = Modifier.fillMaxWidth().height(56.dp),
             enabled = !uiState.isLoading && confirmData
         )
     }
 
-    // Dialogs
     if (showDatePicker) {
         val datePickerState = rememberDatePickerState(initialSelectedDateMillis = selectedDateMillis)
         DatePickerDialog(
@@ -378,7 +485,10 @@ private fun ReportTextField(
 }
 
 @Composable
-private fun LocationPreview() {
+private fun LocationPreview(
+    deviceCoordinates: DeviceCoordinates?,
+    locationStatus: String
+) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -391,8 +501,26 @@ private fun LocationPreview() {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Default.Map, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(40.dp))
             Spacer(modifier = Modifier.height(12.dp))
-            Text("Mapa no disponible", style = MaterialTheme.typography.labelLarge, color = Color.White)
-            Text("Se usará tu ubicación actual", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                text = if (deviceCoordinates != null) "Ubicacion detectada" else "Ubicacion pendiente",
+                style = MaterialTheme.typography.labelLarge,
+                color = Color.White
+            )
+            Text(
+                text = locationStatus,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 24.dp)
+            )
+            if (deviceCoordinates != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "${deviceCoordinates.latitude}, ${deviceCoordinates.longitude}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = PrimaryContainer
+                )
+            }
         }
     }
 }
@@ -443,7 +571,6 @@ private fun TimePickerDialog(
                 Text(String.format("%02d:%02d", hour, minute), style = MaterialTheme.typography.displayMedium, color = PrimaryContainer)
                 Spacer(modifier = Modifier.height(16.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    // Simple numeric selection for this mockup
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         IconButton(onClick = { if (hour < 23) hour++ else hour = 0 }) { Icon(Icons.Default.KeyboardArrowUp, null, tint = Color.White) }
                         Text("Hora", color = Color.Gray, style = MaterialTheme.typography.labelSmall)
@@ -482,26 +609,26 @@ fun CategoryItem(category: ReportCategory, isSelected: Boolean, modifier: Modifi
         )
     ) {
         Row(
-            modifier = Modifier.fillMaxSize().padding(12.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = if (category.isFullWidth) Arrangement.Start else Arrangement.Center
         ) {
             Icon(
-                category.icon, 
-                contentDescription = null, 
+                category.icon,
+                contentDescription = null,
                 tint = if (isSelected) category.color else Color.White.copy(alpha = 0.6f),
                 modifier = Modifier.size(24.dp)
             )
-            if (category.isFullWidth || !category.isFullWidth) {
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = category.name,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isSelected) Color.White else Color.White.copy(alpha = 0.7f),
-                    textAlign = if (category.isFullWidth) TextAlign.Start else TextAlign.Center
-                )
-            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                text = category.name,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = if (isSelected) Color.White else Color.White.copy(alpha = 0.7f),
+                textAlign = if (category.isFullWidth) TextAlign.Start else TextAlign.Center
+            )
         }
     }
 }

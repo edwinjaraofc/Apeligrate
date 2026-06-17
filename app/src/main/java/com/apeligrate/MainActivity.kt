@@ -8,10 +8,17 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
@@ -25,24 +32,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
-import com.apeligrate.domain.model.Alert
-import com.apeligrate.domain.model.Severity
 import com.apeligrate.ui.components.SentinelBackground
 import com.apeligrate.ui.components.SentinelBottomBar
-import com.apeligrate.ui.components.SentinelButton
-import com.apeligrate.ui.components.SentinelCard
 import com.apeligrate.ui.components.SentinelTab
 import com.apeligrate.ui.theme.ApeligrateTheme
-import com.apeligrate.ui.theme.SafeGreen
-import com.apeligrate.ui.theme.WarningAmber
-import com.apeligrate.ui.viewmodel.MainViewModel
 
 import com.apeligrate.domain.use_case.PerformLoginUseCase
 import com.apeligrate.domain.use_case.RegisterUserUseCase
 import com.apeligrate.ui.screens.FeedScreen
 import com.apeligrate.ui.screens.LoginScreen
+import com.apeligrate.ui.screens.MainScreen
 import com.apeligrate.ui.screens.ProfileScreen
 import com.apeligrate.ui.screens.RegisterScreen
 import com.apeligrate.ui.screens.ReportScreen
@@ -127,12 +127,18 @@ class MainActivity : ComponentActivity() {
                                 ) { innerPadding ->
                                     Box(modifier = Modifier.padding(innerPadding)) {
                                         when (selectedTab) {
-                                            SentinelTab.INICIO -> MainScreen()
+                                            SentinelTab.INICIO -> MainScreen(
+                                                incidentRepository = incidentRepository,
+                                                onNavigateToReport = { selectedTab = SentinelTab.REPORTAR }
+                                            )
                                             SentinelTab.FEED -> {
                                                 val feedViewModel = remember { FeedViewModel(incidentRepository) }
                                                 FeedScreen(viewModel = feedViewModel)
                                             }
-                                            SentinelTab.REPORTAR -> ReportScreen()
+                                            SentinelTab.REPORTAR -> ReportScreen(
+                                                repository = incidentRepository,
+                                                onReportSubmitted = { selectedTab = SentinelTab.INICIO }
+                                            )
                                             SentinelTab.PERFIL -> ProfileScreen()
                                         }
                                     }
@@ -194,89 +200,3 @@ fun SentinelTopBar(onLogoutClick: () -> Unit) {
     }
 }
 
-@Composable
-fun MainScreen(viewModel: MainViewModel = viewModel()) {
-    val uiState by viewModel.uiState.collectAsState()
-
-    Column(
-        modifier = Modifier
-            .padding(16.dp)
-            .fillMaxSize(),
-    ) {
-        Text(
-            text = "SENTINEL SYSTEM",
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.ExtraBold,
-            letterSpacing = 2.sp,
-        )
-        Text(
-            text = "ESTADO: VIGILANCIA ACTIVA",
-            style = MaterialTheme.typography.labelSmall,
-            color = SafeGreen,
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            items(uiState.alerts) { alert ->
-                AlertItem(alert)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            SentinelButton(
-                text = "EMERGENCIA",
-                onClick = { /* Emergency Action */ },
-                modifier = Modifier.weight(1f),
-            )
-            SentinelButton(
-                text = "REPORTAR",
-                onClick = { /* Report Action */ },
-                modifier = Modifier.weight(1f),
-                isPrimary = false,
-            )
-        }
-    }
-}
-
-@Composable
-fun AlertItem(alert: Alert) {
-    SentinelCard(modifier = Modifier.fillMaxWidth()) {
-        Column {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(
-                    text = alert.title,
-                    fontWeight = FontWeight.Bold,
-                    color = when (alert.severity) {
-                        Severity.CRITICAL -> MaterialTheme.colorScheme.primary
-                        Severity.WARNING -> WarningAmber
-                        Severity.SAFE -> SafeGreen
-                    },
-                )
-                Text(
-                    text = "ID: ${alert.id}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.Gray,
-                )
-            }
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = alert.description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color.White.copy(alpha = 0.7f),
-            )
-        }
-    }
-}
