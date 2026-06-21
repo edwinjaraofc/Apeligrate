@@ -1,26 +1,35 @@
 package com.apeligrate.ui.viewmodel
 
+import android.location.Location
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.apeligrate.data.local.DeviceCoordinates
 import com.apeligrate.domain.model.Alert
 import com.apeligrate.domain.model.Severity
 import com.apeligrate.domain.use_case.GetLatestAlertsUseCase
+import com.apeligrate.util.NotificationHelper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class MainUiState(
     val alerts: List<Alert> = emptyList(),
     val isLoading: Boolean = false,
     val error: String? = null,
+    val proximityAlert: Alert? = null,
+    val focusedLocation: DeviceCoordinates? = null
 )
 
 class MainViewModel(
+    private val notificationHelper: NotificationHelper? = null,
     private val getLatestAlertsUseCase: GetLatestAlertsUseCase? = null
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
+
+    private val notifiedAlertIds = mutableSetOf<String>()
 
     init {
         loadAlerts()
@@ -28,8 +37,8 @@ class MainViewModel(
 
     private fun loadAlerts() {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true)
-            // Mocking data for now as we don't have Repository implementation yet
+            _uiState.update { it.copy(isLoading = true) }
+            // Mocking data for now
             val mockAlerts = listOf(
                 Alert(
                     id = "1",
@@ -40,13 +49,76 @@ class MainViewModel(
                 ),
                 Alert(
                     id = "2",
-                    title = "INTRUSIÓN DETECTADA",
-                    description = "Sector Noroeste - Zona 4.",
+                    title = "ROBO REPORTADO",
+                    description = "Asalto con arma de fuego reportado cerca de tu posición.",
                     severity = Severity.CRITICAL,
                     timestamp = System.currentTimeMillis(),
+                    latitude = -12.0673, // Near Lima
+                    longitude = -77.0336
                 ),
             )
-            _uiState.value = _uiState.value.copy(alerts = mockAlerts, isLoading = false)
+            _uiState.update { it.copy(alerts = mockAlerts, isLoading = false) }
         }
+    }
+
+    fun onLocationUpdated(latitude: Double, longitude: Double) {
+        checkProximity(latitude, longitude)
+    }
+
+    private fun checkProximity(latitude: Double, longitude: Double) {
+        val currentAlerts = _uiState.value.alerts
+        val proximityAlerts = currentAlerts.filter { alert ->
+            if (alert.latitude != null && alert.longitude != null) {
+                val results = FloatArray(1)
+                Location.distanceBetween(latitude, longitude, alert.latitude, alert.longitude, results)
+                results[0] < 500 // 500 meters
+            } else false
+        }
+
+        val nearestCritical = proximityAlerts.firstOrNull { it.severity == Severity.CRITICAL }
+        
+        if (nearestCritical != null) {
+            _uiState.update { it.copy(proximityAlert = nearestCritical) }
+            
+            // Trigger push notification if not already notified for this alert
+            if (!notifiedAlertIds.contains(nearestCritical.id)) {
+                notificationHelper?.showProximityAlert(
+                    title = "¡ALERTA DE SEGURIDAD!",
+                    message = nearestCritical.description
+                )
+                notifiedAlertIds.add(nearestCritical.id)
+            }
+        } else {
+            _uiState.update { it.copy(proximityAlert = null) }
+        }
+    }
+
+    fun focusLocation(latitude: Double, longitude: Double) {
+        _uiState.update { it.copy(focusedLocation = DeviceCoordinates(latitude, longitude)) }
+    }
+
+    fun clearFocus() {
+        _uiState.update { it.copy(focusedLocation = null) }
+    }
+
+    fun triggerTestNotification() {
+        // Mock a robbery report nearby to trigger the notification
+        val testAlert = Alert(
+            id = "test_${System.currentTimeMillis()}",
+            title = "SIMULACIÓN DE ROBO",
+            description = "Se ha simulado un reporte de robo en tu zona actual.",
+            severity = Severity.CRITICAL,
+            timestamp = System.currentTimeMillis()
+        )
+        
+        _uiState.update { it.copy(proximityAlert = testAlert) }
+        notificationHelper?.showProximityAlert(
+            title = "¡ALERTA CRÍTICA!",
+            message = "Zona de peligro detectada: Reporte de robo reciente."
+        )
+    }
+
+    fun dismissProximityAlert() {
+        _uiState.update { it.copy(proximityAlert = null) }
     }
 }

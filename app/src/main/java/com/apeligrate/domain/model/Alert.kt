@@ -6,6 +6,8 @@ data class Alert(
     val description: String,
     val severity: Severity,
     val timestamp: Long,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
 )
 
 enum class Severity {

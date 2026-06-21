@@ -22,7 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import com.apeligrate.ui.components.SentinelBackground
 import com.apeligrate.ui.components.SentinelBottomBar
@@ -49,6 +50,7 @@ import com.apeligrate.ui.screens.ReportScreen
 import com.apeligrate.ui.screens.SplashScreen
 import com.apeligrate.ui.viewmodel.FeedViewModel
 import com.apeligrate.ui.viewmodel.LoginViewModel
+import com.apeligrate.ui.viewmodel.MainViewModel
 import com.apeligrate.ui.viewmodel.RegisterViewModel
 
 private const val TAG = "MainActivity"
@@ -104,6 +106,7 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         "main" -> {
+                            val mainViewModel: MainViewModel = viewModel()
                             SentinelBackground {
                                 Scaffold(
                                     modifier = Modifier.fillMaxSize(),
@@ -129,11 +132,20 @@ class MainActivity : ComponentActivity() {
                                         when (selectedTab) {
                                             SentinelTab.INICIO -> MainScreen(
                                                 incidentRepository = incidentRepository,
-                                                onNavigateToReport = { selectedTab = SentinelTab.REPORTAR }
+                                                onNavigateToReport = { selectedTab = SentinelTab.REPORTAR },
+                                                viewModel = mainViewModel
                                             )
                                             SentinelTab.FEED -> {
                                                 val feedViewModel = remember { FeedViewModel(incidentRepository) }
-                                                FeedScreen(viewModel = feedViewModel)
+                                                FeedScreen(
+                                                    viewModel = feedViewModel,
+                                                    onReportClick = { report ->
+                                                        if (report.latitude != null && report.longitude != null) {
+                                                            mainViewModel.focusLocation(report.latitude, report.longitude)
+                                                            selectedTab = SentinelTab.INICIO
+                                                        }
+                                                    }
+                                                )
                                             }
                                             SentinelTab.REPORTAR -> ReportScreen(
                                                 repository = incidentRepository,
@@ -184,7 +196,7 @@ fun SentinelTopBar(onLogoutClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                imageVector = Icons.Default.Logout,
+                imageVector = Icons.AutoMirrored.Filled.Logout,
                 contentDescription = "Cerrar sesión",
                 tint = Color(0xFFFFB3B3),
                 modifier = Modifier.size(16.dp)
@@ -199,4 +211,3 @@ fun SentinelTopBar(onLogoutClick: () -> Unit) {
         }
     }
 }
-

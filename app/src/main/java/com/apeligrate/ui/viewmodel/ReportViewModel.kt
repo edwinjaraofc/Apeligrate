@@ -3,6 +3,7 @@ package com.apeligrate.ui.viewmodel
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.apeligrate.data.local.DeviceCoordinates
 import com.apeligrate.domain.model.IncidentReport
 import com.apeligrate.domain.use_case.SubmitIncidentReportUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,7 +20,8 @@ data class ReportUiState(
     val isLoading: Boolean = false,
     val isSuccess: Boolean = false,
     val error: String? = null,
-    val lastReportId: String? = null
+    val lastReportId: String? = null,
+    val pickedLocation: DeviceCoordinates? = null
 )
 
 class ReportViewModel(
@@ -39,6 +41,10 @@ class ReportViewModel(
 
     fun onAnonymousChange(isAnonymous: Boolean) {
         _uiState.update { it.copy(isAnonymous = isAnonymous) }
+    }
+
+    fun onLocationPicked(latitude: Double, longitude: Double) {
+        _uiState.update { it.copy(pickedLocation = DeviceCoordinates(latitude, longitude)) }
     }
 
     fun addImages(uris: List<Uri>) {
@@ -71,6 +77,9 @@ class ReportViewModel(
             return
         }
 
+        val finalLat = currentState.pickedLocation?.latitude ?: latitude
+        val finalLng = currentState.pickedLocation?.longitude ?: longitude
+
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null, isSuccess = false) }
 
@@ -79,11 +88,11 @@ class ReportViewModel(
                 description = currentState.description,
                 isAnonymous = currentState.isAnonymous,
                 userId = if (currentState.isAnonymous) null else userId,
-                latitude = latitude,
-                longitude = longitude,
+                latitude = finalLat,
+                longitude = finalLng,
                 address = address,
                 reportedAt = System.currentTimeMillis(),
-                status = "pending",
+                status = if (currentState.category == "Robo a mano armada") "critical" else "warning",
                 images = currentState.selectedImages.map { it.toString() }
             )
 

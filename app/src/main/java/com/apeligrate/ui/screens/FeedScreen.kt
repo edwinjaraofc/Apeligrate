@@ -31,7 +31,8 @@ import java.util.*
 
 @Composable
 fun FeedScreen(
-    viewModel: FeedViewModel
+    viewModel: FeedViewModel,
+    onReportClick: (IncidentReport) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
@@ -87,7 +88,8 @@ fun FeedScreen(
                 FeedItem(
                     report = report,
                     onValidate = { viewModel.validateReport(report.id, true) },
-                    onFalse = { viewModel.validateReport(report.id, false) }
+                    onFalse = { viewModel.validateReport(report.id, false) },
+                    onClick = { onReportClick(report) }
                 )
             }
         }
@@ -98,7 +100,8 @@ fun FeedScreen(
 fun FeedItem(
     report: IncidentReport,
     onValidate: () -> Unit,
-    onFalse: () -> Unit
+    onFalse: () -> Unit,
+    onClick: () -> Unit
 ) {
     val categoryColor = when (report.status) {
         "critical" -> Color(0xFFFF5252)
@@ -115,7 +118,9 @@ fun FeedItem(
     }
 
     GlassPanel(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
         cornerRadius = 16.dp
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -173,7 +178,7 @@ fun FeedItem(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
-            Divider(color = Color.White.copy(alpha = 0.05f))
+            HorizontalDivider(color = Color.White.copy(alpha = 0.05f))
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(

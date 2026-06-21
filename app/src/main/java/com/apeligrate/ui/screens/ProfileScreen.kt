@@ -19,11 +19,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.toColorInt
+import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import com.apeligrate.data.local.SessionManager
 import com.apeligrate.domain.model.Achievement
 import com.apeligrate.ui.components.GlassPanel
 import com.apeligrate.ui.components.TactileButton
@@ -32,9 +35,16 @@ import com.apeligrate.ui.viewmodel.ProfileViewModel
 
 @Composable
 fun ProfileScreen(
-    viewModel: ProfileViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    viewModel: ProfileViewModel = viewModel()
 ) {
+    val context = LocalContext.current
+    val sessionManager = remember { SessionManager(context) }
+    val userId by sessionManager.userIdFlow.collectAsState(initial = null)
     val uiState by viewModel.uiState.collectAsState()
+
+    LaunchedEffect(userId) {
+        userId?.let { viewModel.loadUserProfile(it) }
+    }
 
     uiState.user?.let { user ->
         if (uiState.isEditing) {
@@ -143,7 +153,7 @@ fun ProfileScreen(
                         
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Nivel ${user.level}", style = MaterialTheme.typography.labelSmall, color = Color.White)
-                            Text("${(user.experience * 100 / user.nextLevelExperience)}% para \"Guardián\"", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                            Text("${(user.experience * 100 / user.nextLevelExperience)}% para el siguiente rango", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                         }
                     }
                 }

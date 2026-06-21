@@ -24,52 +24,73 @@ class ProfileViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(ProfileUiState())
     val uiState: StateFlow<ProfileUiState> = _uiState.asStateFlow()
 
-    init {
-        loadUserProfile()
-    }
-
-    private fun loadUserProfile() {
+    fun loadUserProfile(userId: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             
-            // Mocking user data for now based on the image provided
-            val mockUser = User(
-                id = "1",
-                name = "Juan Pérez",
-                email = "juan.perez@example.com",
-                profileImageUrl = null, // Using local resource in UI if null
-                city = "Ciudad de México, MX",
-                isVerified = true,
-                level = 8,
-                experience = 880,
-                nextLevelExperience = 1000,
-                reputationTitle = "Protector",
-                reportsCount = 45,
-                validationsCount = 120,
-                achievements = listOf(
-                    Achievement(
-                        id = "1",
-                        title = "Vigilante",
-                        description = "Por detectar 20 incidentes críticos en tiempo real.",
-                        iconName = "visibility",
-                        colorHex = "#FF5252"
-                    ),
-                    Achievement(
-                        id = "2",
-                        title = "Colaborador",
-                        description = "Validó 100 reportes de la comunidad local.",
-                        iconName = "diamond",
-                        colorHex = "#FFC107"
-                    ),
-                    Achievement(
-                        id = "3",
-                        title = "Héroe",
-                        description = "Asistencia directa en 5 situaciones de emergencia confirmadas.",
-                        iconName = "star",
-                        colorHex = "#4DB6AC"
+            val mockUser = if (userId == "2") {
+                User(
+                    id = "2",
+                    name = "María García",
+                    email = "maria.garcia@example.com",
+                    profileImageUrl = "https://randomuser.me/api/portraits/women/44.jpg",
+                    city = "Guadalajara, MX",
+                    isVerified = true,
+                    level = 12,
+                    experience = 1250,
+                    nextLevelExperience = 2000,
+                    reputationTitle = "Guardián de Élite",
+                    reportsCount = 89,
+                    validationsCount = 450,
+                    achievements = listOf(
+                        Achievement(
+                            id = "4",
+                            title = "Ojo de Halcón",
+                            description = "Detectó 50 incidentes en menos de 1 hora.",
+                            iconName = "visibility",
+                            colorHex = "#4FC3F7"
+                        ),
+                        Achievement(
+                            id = "5",
+                            title = "Veterana",
+                            description = "Más de 1 año protegiendo la comunidad.",
+                            iconName = "star",
+                            colorHex = "#FFD54F"
+                        )
                     )
                 )
-            )
+            } else {
+                User(
+                    id = "1",
+                    name = "Juan Pérez",
+                    email = "juan.perez@example.com",
+                    profileImageUrl = null,
+                    city = "Ciudad de México, MX",
+                    isVerified = true,
+                    level = 8,
+                    experience = 880,
+                    nextLevelExperience = 1000,
+                    reputationTitle = "Protector",
+                    reportsCount = 45,
+                    validationsCount = 120,
+                    achievements = listOf(
+                        Achievement(
+                            id = "1",
+                            title = "Vigilante",
+                            description = "Por detectar 20 incidentes críticos en tiempo real.",
+                            iconName = "visibility",
+                            colorHex = "#FF5252"
+                        ),
+                        Achievement(
+                            id = "2",
+                            title = "Colaborador",
+                            description = "Validó 100 reportes de la comunidad local.",
+                            iconName = "diamond",
+                            colorHex = "#FFC107"
+                        )
+                    )
+                )
+            }
             
             _uiState.update { 
                 it.copy(
@@ -101,7 +122,6 @@ class ProfileViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             
-            // Simulate API call
             val updatedUser = user.copy(
                 name = currentState.editName,
                 city = currentState.editCity

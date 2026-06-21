@@ -1,12 +1,12 @@
 package com.apeligrate.data.repository
 
 import android.util.Log
+import com.apeligrate.data.local.SessionManager
 import com.apeligrate.data.remote.BackendConfig
 import com.apeligrate.data.remote.SentinelApiService
 import com.apeligrate.domain.model.AuthCredentials
 import com.apeligrate.domain.model.User
 import com.apeligrate.domain.repository.AuthRepository
-import com.apeligrate.data.local.SessionManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,6 +47,20 @@ class RemoteAuthRepository(private val sessionManager: SessionManager) : AuthRep
     }
 
     override suspend fun login(credentials: AuthCredentials): Result<User> = withContext(Dispatchers.IO) {
+        // Handle test accounts
+        if (credentials.email == "1" && credentials.password == "1") {
+            sessionManager.setSession("1")
+            val user = User(id = "1", name = "Juan Pérez", email = "1")
+            _currentUser.value = user
+            return@withContext Result.success(user)
+        }
+        if (credentials.email == "2" && credentials.password == "2") {
+            sessionManager.setSession("2")
+            val user = User(id = "2", name = "María García", email = "2")
+            _currentUser.value = user
+            return@withContext Result.success(user)
+        }
+
         try {
             val passwordHash = hashPassword(credentials.password)
             val users = api.queryUsers(
@@ -57,10 +71,7 @@ class RemoteAuthRepository(private val sessionManager: SessionManager) : AuthRep
             if (users.isNotEmpty()) {
                 val first = users[0]
                 val id = first["id"]?.toString() ?: credentials.email
-                Log.d(TAG, "Login successful. Extracted id: $id")
-                Log.d(TAG, "Saving session with userId: $id")
                 sessionManager.setSession(id)
-                Log.d(TAG, "Session saved successfully")
 
                 val name = first["name"]?.toString() ?: ""
                 val email = first["email"]?.toString() ?: credentials.email
@@ -70,11 +81,9 @@ class RemoteAuthRepository(private val sessionManager: SessionManager) : AuthRep
                 _currentUser.value = user
                 Result.success(user)
             } else {
-                Log.w(TAG, "Login failed: items list is empty")
                 Result.failure(Exception("Credenciales inválidas"))
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Login error", e)
             Result.failure(e)
         }
     }
@@ -90,7 +99,6 @@ class RemoteAuthRepository(private val sessionManager: SessionManager) : AuthRep
                     profile_image_url = credentials.profileImageUrl
                 )
 
-                Log.d(TAG, "Sending register request for email: ${credentials.email}")
                 val response = api.createUser(request)
                 if (response.isEmpty()) {
                     return@withContext Result.failure(Exception("Usuario no creado"))
@@ -98,10 +106,7 @@ class RemoteAuthRepository(private val sessionManager: SessionManager) : AuthRep
 
                 val created = response[0]
                 val id = created["id"]?.toString() ?: credentials.email
-                Log.d(TAG, "Register successful. Extracted id: $id")
-                Log.d(TAG, "Saving session with userId: $id")
                 sessionManager.setSession(id)
-                Log.d(TAG, "Session saved successfully")
 
                 val respName = created["name"]?.toString() ?: name
                 val respEmail = created["email"]?.toString() ?: credentials.email
@@ -111,7 +116,6 @@ class RemoteAuthRepository(private val sessionManager: SessionManager) : AuthRep
                 _currentUser.value = user
                 Result.success(user)
             } catch (e: Exception) {
-                Log.e(TAG, "Register error", e)
                 Result.failure(e)
             }
         }
@@ -128,7 +132,6 @@ class RemoteAuthRepository(private val sessionManager: SessionManager) : AuthRep
     override fun getCurrentUser(): Flow<User?> = _currentUser.asStateFlow()
 
     override suspend fun logout() {
-        Log.d(TAG, "User logout requested")
         sessionManager.clearSession()
         _currentUser.value = null
     }
@@ -138,4 +141,3 @@ class RemoteAuthRepository(private val sessionManager: SessionManager) : AuthRep
         return digest.joinToString(separator = "") { byte -> "%02x".format(byte) }
     }
 }
-
