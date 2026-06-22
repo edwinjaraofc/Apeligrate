@@ -341,8 +341,8 @@ private fun TimePickerDialog(selectedHour: Int, selectedMinute: Int, onConfirm: 
                         IconButton(onClick = { if (hour > 0) hour-- else hour = 23 }) { Icon(Icons.Default.KeyboardArrowDown, null, tint = Color.White) }
                     }
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        IconButton(onClick = { if (minute < 59) minute += 5 else minute = 0 }) { Icon(Icons.Default.KeyboardArrowUp, null, tint = Color.White) }
-                        IconButton(onClick = { if (minute > 0) minute -= 5 else minute = 55 }) { Icon(Icons.Default.KeyboardArrowDown, null, tint = Color.White) }
+                        IconButton(onClick = { if (minute < 59) minute++ else minute = 0 }) { Icon(Icons.Default.KeyboardArrowUp, null, tint = Color.White) }
+                        IconButton(onClick = { if (minute > 0) minute-- else minute = 59 }) { Icon(Icons.Default.KeyboardArrowDown, null, tint = Color.White) }
                     }
                 }
             }

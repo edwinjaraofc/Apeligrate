@@ -1,12 +1,14 @@
 package com.apeligrate
 
 import android.Manifest
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.ContactsContract
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -34,11 +36,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.apeligrate.domain.model.Contact
+import com.apeligrate.domain.model.IncidentReport
 import com.apeligrate.domain.model.User
 import com.apeligrate.domain.repository.IncidentReportRepository
 import com.apeligrate.domain.use_case.PerformLoginUseCase
@@ -77,6 +81,8 @@ class MainActivity : ComponentActivity() {
                 var currentScreen by remember { mutableStateOf<String?>(null) }
                 var selectedTab by remember { mutableStateOf(SentinelTab.INICIO) }
                 var selectedDrawerTab by remember { mutableStateOf(DrawerTab.NONE) }
+                var detailReport by remember { mutableStateOf<IncidentReport?>(null) }
+                
                 val coroutineScope = rememberCoroutineScope()
                 val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
@@ -121,6 +127,7 @@ class MainActivity : ComponentActivity() {
 
                             ModalNavigationDrawer(
                                 drawerState = drawerState,
+                                gesturesEnabled = false, // DESACTIVA EL SWIPE PARA EL MENÚ
                                 drawerContent = {
                                     SentinelDrawerContent(
                                         user = profileViewModel.uiState.collectAsState().value.user,
@@ -157,22 +164,38 @@ class MainActivity : ComponentActivity() {
                                             )
                                         },
                                         bottomBar = {
-                                            SentinelBottomBar(
-                                                selectedTab = selectedTab,
-                                                onTabSelected = { 
-                                                    selectedTab = it
-                                                    selectedDrawerTab = DrawerTab.NONE
-                                                }
-                                            )
+                                            // Solo mostrar barra si no estamos viendo un detalle ni una pestaña del drawer
+                                            if (detailReport == null && selectedDrawerTab == DrawerTab.NONE) {
+                                                SentinelBottomBar(
+                                                    selectedTab = selectedTab,
+                                                    onTabSelected = { 
+                                                        selectedTab = it
+                                                        selectedDrawerTab = DrawerTab.NONE
+                                                    }
+                                                )
+                                            }
                                         }
                                     ) { innerPadding ->
                                         Box(modifier = Modifier.padding(innerPadding)) {
-                                            if (selectedDrawerTab != DrawerTab.NONE) {
+                                            if (detailReport != null) {
+                                                ReportDetailScreen(
+                                                    report = detailReport!!,
+                                                    onBack = { detailReport = null },
+                                                    onShowOnMap = {
+                                                        if (detailReport!!.latitude != null && detailReport!!.longitude != null) {
+                                                            mainViewModel.focusLocation(detailReport!!.latitude!!, detailReport!!.longitude!!)
+                                                            selectedTab = SentinelTab.INICIO
+                                                            detailReport = null
+                                                        }
+                                                    }
+                                                )
+                                            } else if (selectedDrawerTab != DrawerTab.NONE) {
                                                 DrawerScreenContent(
                                                     tab = selectedDrawerTab, 
                                                     onBack = { selectedDrawerTab = DrawerTab.NONE },
                                                     incidentRepository = incidentRepository,
-                                                    currentUserId = userId
+                                                    currentUserId = userId,
+                                                    onReportClick = { detailReport = it }
                                                 )
                                             } else {
                                                 when (selectedTab) {
@@ -186,10 +209,7 @@ class MainActivity : ComponentActivity() {
                                                         FeedScreen(
                                                             viewModel = feedViewModel,
                                                             onReportClick = { report ->
-                                                                if (report.latitude != null && report.longitude != null) {
-                                                                    mainViewModel.focusLocation(report.latitude, report.longitude)
-                                                                    selectedTab = SentinelTab.INICIO
-                                                                }
+                                                                detailReport = report
                                                             }
                                                         )
                                                     }
@@ -213,12 +233,117 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
+fun ReportDetailScreen(
+    report: IncidentReport,
+    onBack: () -> Unit,
+    onShowOnMap: () -> Unit
+) {
+    BackHandler(onBack = onBack)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0A0A0A))
+            .padding(16.dp)
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+        }
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        Text(
+            text = report.category,
+            style = MaterialTheme.typography.headlineMedium,
+            color = if (report.status == "critical") Color(0xFFFF5252) else Color(0xFFFFC107),
+            fontWeight = FontWeight.ExtraBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        
+        Text(
+            text = formatTimestamp(report.reportedAt),
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.Gray
+        )
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        if (report.images.isNotEmpty()) {
+            AsyncImage(
+                model = report.images.first(),
+                contentDescription = null,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(240.dp)
+                    .clip(RoundedCornerShape(16.dp)),
+                contentScale = ContentScale.Crop
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(140.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.White.copy(0.05f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.ImageNotSupported, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(48.dp))
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+        }
+        
+        Text(
+            text = "DETALLES DEL REPORTE",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.sp
+        )
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        Text(
+            text = report.description,
+            style = MaterialTheme.typography.bodyLarge,
+            color = Color.White.copy(alpha = 0.9f)
+        )
+
+        if (report.isAnonymous) {
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.VisibilityOff, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Enviado de forma anónima", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+            }
+        }
+        
+        Spacer(modifier = Modifier.weight(1f))
+        
+        if (report.latitude != null && report.longitude != null) {
+            Button(
+                onClick = onShowOnMap,
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Default.Map, contentDescription = null, tint = Color.Black)
+                Spacer(modifier = Modifier.width(12.dp))
+                Text("UBICAR EN EL MAPA", color = Color.Black, fontWeight = FontWeight.Black)
+            }
+        }
+    }
+}
+
+@Composable
 fun DrawerScreenContent(
     tab: DrawerTab, 
     onBack: () -> Unit,
     incidentRepository: IncidentReportRepository,
-    currentUserId: String?
+    currentUserId: String?,
+    onReportClick: (IncidentReport) -> Unit
 ) {
+    BackHandler(onBack = onBack)
     Column(modifier = Modifier.fillMaxSize().background(Color(0xFF0A0A0A)).padding(16.dp)) {
         IconButton(onClick = onBack) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
@@ -227,7 +352,7 @@ fun DrawerScreenContent(
             DrawerTab.SAFETY_SETTINGS -> SafetySettingsScreen()
             DrawerTab.TRUSTED_CONTACTS -> TrustedContactsScreen()
             DrawerTab.EMERGENCY_SERVICES -> EmergencyServicesScreen()
-            DrawerTab.HISTORY -> HistoryScreen(incidentRepository, currentUserId)
+            DrawerTab.HISTORY -> HistoryScreen(incidentRepository, currentUserId, onReportClick)
             DrawerTab.HELP_CENTER -> HelpCenterScreen()
             else -> {}
         }
@@ -260,7 +385,14 @@ fun SentinelDrawerContent(
                 }
                 Spacer(modifier = Modifier.width(16.dp))
                 Column {
-                    Text(text = user?.name ?: "Guardian User", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text(
+                        text = user?.name ?: "Guardian User", 
+                        color = Color.White, 
+                        fontWeight = FontWeight.Bold, 
+                        fontSize = 18.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                     Text(text = "Trust Level: ${user?.reputationTitle ?: "High"}", color = Color.Gray, fontSize = 12.sp)
                 }
             }
@@ -287,7 +419,14 @@ fun DrawerTabItem(icon: ImageVector, label: String, isSelected: Boolean = false,
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(imageVector = icon, contentDescription = null, tint = if (isSelected) Color.Black else Color.White.copy(alpha = 0.7f), modifier = Modifier.size(22.dp))
             Spacer(modifier = Modifier.width(16.dp))
-            Text(text = label, color = if (isSelected) Color.Black else Color.White, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal, fontSize = 15.sp)
+            Text(
+                text = label, 
+                color = if (isSelected) Color.Black else Color.White, 
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal, 
+                fontSize = 15.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -295,15 +434,22 @@ fun DrawerTabItem(icon: ImageVector, label: String, isSelected: Boolean = false,
 @Composable
 fun SentinelTopBar(onMenuClick: () -> Unit, onLogoutClick: () -> Unit) {
     Row(modifier = Modifier.fillMaxWidth().statusBarsPadding().height(64.dp).background(Color(0xCC131313)).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
             IconButton(onClick = onMenuClick) { Icon(Icons.Default.Menu, contentDescription = "Menu", tint = MaterialTheme.colorScheme.primary) }
             Spacer(modifier = Modifier.width(4.dp))
-            Text(text = "Apeligrate", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold)
+            Text(
+                text = "Apeligrate", 
+                style = MaterialTheme.typography.headlineMedium, 
+                color = MaterialTheme.colorScheme.primary, 
+                fontWeight = FontWeight.ExtraBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
         Row(modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x33FF4D4D)).border(1.dp, Color(0x55FF6B6B), RoundedCornerShape(999.dp)).clickable(onClick = onLogoutClick).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(imageVector = Icons.AutoMirrored.Filled.Logout, contentDescription = "Cerrar sesión", tint = Color(0xFFFFB3B3), modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(6.dp))
-            Text(text = "Salir", color = Color(0xFFFFD6D6), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(text = "Salir", color = Color(0xFFFFD6D6), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, softWrap = false)
         }
     }
 }
@@ -325,7 +471,7 @@ fun SafetySettingsScreen() {
 fun SafetyItem(label: String, initialValue: Boolean) {
     var checked by remember { mutableStateOf(initialValue) }
     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = Color.White)
+        Text(label, color = Color.White, modifier = Modifier.weight(1f))
         Switch(checked = checked, onCheckedChange = { checked = it })
     }
 }
@@ -388,7 +534,10 @@ fun TrustedContactsScreen() {
         
         LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(contacts) { contact ->
-                ContactItem(contact.name, contact.phone)
+                ContactItem(contact.name, contact.phone) {
+                    val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${contact.phone}"))
+                    context.startActivity(intent)
+                }
             }
         }
 
@@ -402,7 +551,7 @@ fun TrustedContactsScreen() {
             ) {
                 Icon(Icons.Default.ContactPage, contentDescription = null)
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("De agenda", fontSize = 12.sp)
+                Text("De agenda", fontSize = 12.sp, softWrap = false)
             }
             Button(
                 onClick = { showAddDialog = true }, 
@@ -411,7 +560,7 @@ fun TrustedContactsScreen() {
             ) {
                 Icon(Icons.Default.Add, contentDescription = null, tint = Color.Black)
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Manual", color = Color.Black, fontSize = 12.sp)
+                Text("Manual", color = Color.Black, fontSize = 12.sp, softWrap = false)
             }
         }
     }
@@ -442,46 +591,70 @@ fun TrustedContactsScreen() {
 }
 
 @Composable
-fun ContactItem(name: String, phone: String) {
-    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color.White.copy(0.05f))) {
+fun ContactItem(name: String, phone: String, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable { onClick() }, 
+        colors = CardDefaults.cardColors(containerColor = Color.White.copy(0.05f))
+    ) {
         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.Person, contentDescription = null, tint = Color.Gray)
             Spacer(modifier = Modifier.width(16.dp))
-            Column {
-                Text(name, color = Color.White, fontWeight = FontWeight.Bold)
-                Text(phone, color = Color.Gray, fontSize = 12.sp)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = name, 
+                    color = Color.White, 
+                    fontWeight = FontWeight.Bold, 
+                    maxLines = 1, 
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(text = phone, color = Color.Gray, fontSize = 12.sp)
             }
+            Icon(Icons.Default.Call, contentDescription = null, tint = Color(0xFF4DB6AC))
         }
     }
 }
 
 @Composable
 fun EmergencyServicesScreen() {
+    val context = LocalContext.current
     Column(modifier = Modifier.padding(8.dp)) {
         Text("Servicios de Emergencia", style = MaterialTheme.typography.headlineSmall, color = Color.White)
         Spacer(modifier = Modifier.height(16.dp))
-        EmergencyItem("Policía", "105", Icons.Default.LocalPolice)
-        EmergencyItem("Bomberos", "116", Icons.Default.FireTruck)
-        EmergencyItem("Ambulancia", "117", Icons.Default.MedicalServices)
+        EmergencyItem("Policía", "105", Icons.Default.LocalPolice) {
+            val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:105"))
+            context.startActivity(intent)
+        }
+        EmergencyItem("Bomberos", "116", Icons.Default.FireTruck) {
+            val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:116"))
+            context.startActivity(intent)
+        }
+        EmergencyItem("Ambulancia", "117", Icons.Default.MedicalServices) {
+            val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:117"))
+            context.startActivity(intent)
+        }
     }
 }
 
 @Composable
-fun EmergencyItem(name: String, number: String, icon: ImageVector) {
+fun EmergencyItem(name: String, number: String, icon: ImageVector, onClick: () -> Unit) {
     Button(
-        onClick = {},
+        onClick = onClick,
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).height(64.dp),
         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252)),
         shape = RoundedCornerShape(12.dp)
     ) {
         Icon(icon, contentDescription = null)
         Spacer(modifier = Modifier.width(16.dp))
-        Text("$name: $number", fontSize = 18.sp, fontWeight = FontWeight.Black)
+        Text("$name: $number", fontSize = 18.sp, fontWeight = FontWeight.Black, softWrap = false)
     }
 }
 
 @Composable
-fun HistoryScreen(repository: IncidentReportRepository, userId: String?) {
+fun HistoryScreen(
+    repository: IncidentReportRepository, 
+    userId: String?,
+    onReportClick: (IncidentReport) -> Unit
+) {
     val reports by repository.getReports().collectAsState(initial = emptyList())
     val myActions = remember(reports, userId) {
         reports.filter { it.userId == userId }
@@ -495,12 +668,13 @@ fun HistoryScreen(repository: IncidentReportRepository, userId: String?) {
         if (myActions.isEmpty()) {
             Text("Aún no tienes reportes registrados.", color = Color.Gray, modifier = Modifier.padding(16.dp))
         } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 items(myActions) { report ->
                     HistoryItem(
                         type = "Reporte: ${report.category}",
                         detail = report.description,
-                        date = formatTimestamp(report.reportedAt)
+                        date = formatTimestamp(report.reportedAt),
+                        onClick = { onReportClick(report) }
                     )
                 }
             }
@@ -514,11 +688,27 @@ fun formatTimestamp(timestamp: Long): String {
 }
 
 @Composable
-fun HistoryItem(type: String, detail: String, date: String) {
+fun HistoryItem(type: String, detail: String, date: String, onClick: () -> Unit) {
     ListItem(
-        headlineContent = { Text(type, color = Color.White, fontWeight = FontWeight.Bold) },
-        supportingContent = { Text(detail, color = Color.Gray, maxLines = 1) },
-        trailingContent = { Text(date, color = Color.DarkGray, fontSize = 10.sp) },
+        modifier = Modifier.clickable { onClick() },
+        headlineContent = { 
+            Text(
+                type, 
+                color = Color.White, 
+                fontWeight = FontWeight.Bold, 
+                maxLines = 1, 
+                overflow = TextOverflow.Ellipsis
+            ) 
+        },
+        supportingContent = { 
+            Text(
+                detail, 
+                color = Color.Gray, 
+                maxLines = 1, 
+                overflow = TextOverflow.Ellipsis
+            ) 
+        },
+        trailingContent = { Text(date, color = Color.DarkGray, fontSize = 10.sp, softWrap = false) },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent)
     )
     HorizontalDivider(color = Color.White.copy(0.05f))

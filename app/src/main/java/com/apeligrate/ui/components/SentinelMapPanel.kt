@@ -31,6 +31,7 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polygon
+import org.osmdroid.views.overlay.Polyline
 
 private data class MapMarker(
     val latitude: Double,
@@ -43,7 +44,8 @@ private data class MapMarker(
 private enum class MarkerKind {
     USER,
     REPORT,
-    PICKER
+    PICKER,
+    DESTINATION
 }
 
 @Composable
@@ -51,16 +53,18 @@ fun SentinelMapPanel(
     modifier: Modifier = Modifier,
     centerCoordinates: DeviceCoordinates? = null,
     reportMarkers: List<IncidentReport> = emptyList(),
+    routePoints: List<DeviceCoordinates> = emptyList(),
+    destination: DeviceCoordinates? = null,
     title: String = "Mapa de vigilancia",
-    subtitle: String = "Visualización basada en OpenStreetMap, sin API key.",
+    subtitle: String = "Visualización basada en OpenStreetMap.",
     isPickerMode: Boolean = false,
     onLocationPicked: (Double, Double) -> Unit = { _, _ -> }
 ) {
     val fallbackCoordinates = remember { DeviceCoordinates(-12.0464, -77.0428) }
     val center = centerCoordinates ?: fallbackCoordinates
     val zoom = if (centerCoordinates != null) 16.5 else 12.0
-    val markers = remember(centerCoordinates, reportMarkers) {
-        buildMarkers(centerCoordinates, reportMarkers)
+    val markers = remember(centerCoordinates, reportMarkers, destination) {
+        buildMarkers(centerCoordinates, reportMarkers, destination)
     }
 
     SentinelCard(modifier = modifier.fillMaxWidth()) {
@@ -104,13 +108,22 @@ fun SentinelMapPanel(
                         }
                     },
                     update = { view ->
-                        // Center and zoom
                         view.controller.setZoom(zoom)
                         view.controller.setCenter(GeoPoint(center.latitude, center.longitude))
                         
                         view.overlays.clear()
 
-                        // Location Picker Overlay
+                        // Trazar Ruta (Polyline)
+                        if (routePoints.isNotEmpty()) {
+                            val line = Polyline(view)
+                            val geoPoints = routePoints.map { GeoPoint(it.latitude, it.longitude) }
+                            line.setPoints(geoPoints)
+                            line.outlinePaint.color = android.graphics.Color.parseColor("#4DB6AC")
+                            line.outlinePaint.strokeWidth = 8f
+                            view.overlays.add(line)
+                        }
+
+                        // Selector de ubicación
                         if (isPickerMode) {
                             val eventsReceiver = object : MapEventsReceiver {
                                 override fun singleTapConfirmedHelper(p: GeoPoint): Boolean {
@@ -122,7 +135,7 @@ fun SentinelMapPanel(
                             view.overlays.add(MapEventsOverlay(eventsReceiver))
                         }
                         
-                        // Add Circles for reports (Radius) with category-specific colors
+                        // Radios de reportes
                         markers.filter { it.kind == MarkerKind.REPORT }.forEach { point ->
                             val colorInt = getCategoryColor(point.category)
                             val circlePoints = Polygon.pointsAsCircle(GeoPoint(point.latitude, point.longitude), 200.0)
@@ -135,6 +148,7 @@ fun SentinelMapPanel(
                             view.overlays.add(circle)
                         }
 
+                        // Marcadores
                         markers.forEach { point ->
                             Marker(view).apply {
                                 position = GeoPoint(point.latitude, point.longitude)
@@ -149,6 +163,7 @@ fun SentinelMapPanel(
                                             MarkerKind.USER -> android.graphics.Color.parseColor("#2A9D8F")
                                             MarkerKind.REPORT -> getCategoryColor(point.category)
                                             MarkerKind.PICKER -> android.graphics.Color.parseColor("#FFC107")
+                                            MarkerKind.DESTINATION -> android.graphics.Color.parseColor("#FF5252")
                                         }
                                     )
                                 }
@@ -175,7 +190,8 @@ private fun getCategoryColor(category: String): Int {
 
 private fun buildMarkers(
     centerCoordinates: DeviceCoordinates?,
-    reportMarkers: List<IncidentReport>
+    reportMarkers: List<IncidentReport>,
+    destination: DeviceCoordinates? = null
 ): List<MapMarker> {
     val publicReports = reportMarkers.mapNotNull { report ->
         val latitude = report.latitude
@@ -199,16 +215,24 @@ private fun buildMarkers(
                 MapMarker(
                     latitude = centerCoordinates.latitude,
                     longitude = centerCoordinates.longitude,
-                    label = "Ubicación seleccionada",
+                    label = "Tu ubicación",
                     kind = MarkerKind.USER
+                )
+            )
+        }
+        if (destination != null) {
+            add(
+                MapMarker(
+                    latitude = destination.latitude,
+                    longitude = destination.longitude,
+                    label = "Destino",
+                    kind = MarkerKind.DESTINATION
                 )
             )
         }
         addAll(publicReports)
         if (publicReports.isEmpty() && centerCoordinates == null) {
             add(MapMarker(-12.0464, -77.0428, "Centro de monitoreo", MarkerKind.REPORT, "Zona peligrosa"))
-            add(MapMarker(-12.0673, -77.0336, "Alerta prioritaria", MarkerKind.REPORT, "Robo a mano armada"))
-            add(MapMarker(-12.0838, -77.0506, "Zona con reportes recientes", MarkerKind.REPORT, "Hurto/Arrebato"))
         }
     }
 }

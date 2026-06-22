@@ -19,7 +19,10 @@ data class MainUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val proximityAlert: Alert? = null,
-    val focusedLocation: DeviceCoordinates? = null
+    val focusedLocation: DeviceCoordinates? = null,
+    val destination: DeviceCoordinates? = null,
+    val routePoints: List<DeviceCoordinates> = emptyList(),
+    val dangerOnRoute: Boolean = false
 )
 
 class MainViewModel(
@@ -30,6 +33,7 @@ class MainViewModel(
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
 
     private val notifiedAlertIds = mutableSetOf<String>()
+    private var lastUserLocation: DeviceCoordinates? = null
 
     init {
         loadAlerts()
@@ -62,6 +66,7 @@ class MainViewModel(
     }
 
     fun onLocationUpdated(latitude: Double, longitude: Double) {
+        lastUserLocation = DeviceCoordinates(latitude, longitude)
         checkProximity(latitude, longitude)
     }
 
@@ -80,7 +85,6 @@ class MainViewModel(
         if (nearestCritical != null) {
             _uiState.update { it.copy(proximityAlert = nearestCritical) }
             
-            // Trigger push notification if not already notified for this alert
             if (!notifiedAlertIds.contains(nearestCritical.id)) {
                 notificationHelper?.showProximityAlert(
                     title = "¡ALERTA DE SEGURIDAD!",
@@ -93,6 +97,54 @@ class MainViewModel(
         }
     }
 
+    fun setDestination(latitude: Double, longitude: Double) {
+        val dest = DeviceCoordinates(latitude, longitude)
+        _uiState.update { it.copy(destination = dest, focusedLocation = dest) }
+        calculateRoute(dest)
+    }
+
+    private fun calculateRoute(dest: DeviceCoordinates) {
+        val start = lastUserLocation ?: return
+        
+        // Trazamos una ruta simulada (línea con un punto intermedio de desvío)
+        val points = listOf(
+            DeviceCoordinates(start.latitude, start.longitude),
+            DeviceCoordinates((start.latitude + dest.latitude) / 2 + 0.002, (start.longitude + dest.longitude) / 2 + 0.002),
+            DeviceCoordinates(dest.latitude, dest.longitude)
+        )
+        
+        _uiState.update { it.copy(routePoints = points) }
+        checkDangerOnRoute(points)
+    }
+
+    private fun checkDangerOnRoute(route: List<DeviceCoordinates>) {
+        val alerts = _uiState.value.alerts
+        var dangerFound = false
+        
+        for (point in route) {
+            for (alert in alerts) {
+                if (alert.latitude != null && alert.longitude != null) {
+                    val results = FloatArray(1)
+                    Location.distanceBetween(point.latitude, point.longitude, alert.latitude, alert.longitude, results)
+                    if (results[0] < 400 && alert.severity == Severity.CRITICAL) {
+                        dangerFound = true
+                        break
+                    }
+                }
+            }
+            if (dangerFound) break
+        }
+        
+        _uiState.update { it.copy(dangerOnRoute = dangerFound) }
+        if (dangerFound) {
+            notificationHelper?.showProximityAlert("Ruta Peligrosa", "Se detectaron zonas de riesgo en tu camino.")
+        }
+    }
+
+    fun clearRoute() {
+        _uiState.update { it.copy(destination = null, routePoints = emptyList(), dangerOnRoute = false, focusedLocation = null) }
+    }
+
     fun focusLocation(latitude: Double, longitude: Double) {
         _uiState.update { it.copy(focusedLocation = DeviceCoordinates(latitude, longitude)) }
     }
@@ -102,7 +154,6 @@ class MainViewModel(
     }
 
     fun triggerTestNotification() {
-        // Mock a robbery report nearby to trigger the notification
         val testAlert = Alert(
             id = "test_${System.currentTimeMillis()}",
             title = "SIMULACIÓN DE ROBO",
@@ -110,12 +161,8 @@ class MainViewModel(
             severity = Severity.CRITICAL,
             timestamp = System.currentTimeMillis()
         )
-        
         _uiState.update { it.copy(proximityAlert = testAlert) }
-        notificationHelper?.showProximityAlert(
-            title = "¡ALERTA CRÍTICA!",
-            message = "Zona de peligro detectada: Reporte de robo reciente."
-        )
+        notificationHelper?.showProximityAlert("¡ALERTA CRÍTICA!", "Zona de peligro detectada.")
     }
 
     fun dismissProximityAlert() {

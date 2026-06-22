@@ -1,13 +1,11 @@
 package com.apeligrate.ui.screens
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -16,18 +14,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.apeligrate.domain.model.IncidentReport
 import com.apeligrate.ui.components.GlassPanel
-import com.apeligrate.ui.theme.PrimaryContainer
 import com.apeligrate.ui.viewmodel.FeedViewModel
-import java.text.SimpleDateFormat
-import java.util.*
 
 @Composable
 fun FeedScreen(
@@ -48,20 +42,26 @@ fun FeedScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "Feed de Actividad",
                     style = MaterialTheme.typography.headlineSmall,
                     color = Color.White,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = "Valida incidentes para mantener a la comunidad segura.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray
+                    color = Color.Gray,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             
+            Spacer(modifier = Modifier.width(8.dp))
+
             Surface(
                 color = Color(0xFF4DB6AC).copy(alpha = 0.2f),
                 shape = RoundedCornerShape(20.dp),
@@ -71,9 +71,19 @@ fun FeedScreen(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(12.dp), tint = Color(0xFF4DB6AC))
+                    Icon(
+                        imageVector = Icons.Default.MyLocation, 
+                        contentDescription = null, 
+                        modifier = Modifier.size(12.dp), 
+                        tint = Color(0xFF4DB6AC)
+                    )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Cerca de ti", style = MaterialTheme.typography.labelSmall, color = Color(0xFF4DB6AC))
+                    Text(
+                        text = "Cerca de ti", 
+                        style = MaterialTheme.typography.labelSmall, 
+                        color = Color(0xFF4DB6AC),
+                        softWrap = false // Fix for vertical text artifact
+                    )
                 }
             }
         }
@@ -111,9 +121,10 @@ fun FeedItem(
     }
 
     val icon = when (report.category) {
-        "Asalto a Mano Armada" -> Icons.Default.Warning
-        "Actividad Sospechosa" -> Icons.Default.Visibility
-        "Falla de Alumbrado Público" -> Icons.Default.Lightbulb
+        "Robo a mano armada" -> Icons.Default.Warning
+        "Hurto/Arrebato" -> Icons.Default.Security
+        "Acoso" -> Icons.Default.Person
+        "Zona peligrosa" -> Icons.Default.LocationOn
         else -> Icons.Default.Info
     }
 
@@ -141,13 +152,16 @@ fun FeedItem(
                             text = report.category,
                             style = MaterialTheme.typography.titleMedium,
                             color = categoryColor,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Text(
                             text = report.description,
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.White.copy(alpha = 0.7f),
-                            maxLines = 2
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -156,25 +170,6 @@ fun FeedItem(
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.Gray
                 )
-            }
-
-            if (report.persistenceMessage.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.History, 
-                        contentDescription = null, 
-                        tint = Color(0xFFFFC107), 
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Contador de persistencia: ${report.persistenceMessage}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFFFFC107),
-                        fontWeight = FontWeight.Bold
-                    )
-                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -204,7 +199,13 @@ fun FeedItem(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("SI, ES REAL", style = MaterialTheme.typography.labelMedium, color = Color.Black, fontWeight = FontWeight.Black)
+                        Text(
+                            "SÍ, ES REAL", 
+                            style = MaterialTheme.typography.labelMedium, 
+                            color = Color.Black, 
+                            fontWeight = FontWeight.Black,
+                            maxLines = 1
+                        )
                     }
                 }
 
@@ -222,7 +223,13 @@ fun FeedItem(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Cancel, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("FALSO", style = MaterialTheme.typography.labelMedium, color = Color.Gray, fontWeight = FontWeight.Bold)
+                        Text(
+                            "FALSO", 
+                            style = MaterialTheme.typography.labelMedium, 
+                            color = Color.Gray, 
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
                     }
                 }
             }
