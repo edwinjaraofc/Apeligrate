@@ -1,6 +1,7 @@
 package com.apeligrate.ui.screens
 
 import android.Manifest
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -34,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.delay
 import com.apeligrate.data.local.DeviceCoordinates
 import com.apeligrate.data.local.DeviceLocationProvider
 import com.apeligrate.domain.model.Alert
@@ -45,6 +47,8 @@ import com.apeligrate.ui.components.SentinelMapPanel
 import com.apeligrate.ui.theme.SafeGreen
 import com.apeligrate.ui.theme.WarningAmber
 import com.apeligrate.ui.viewmodel.MainViewModel
+import com.apeligrate.util.GeofenceManager
+import com.apeligrate.util.NotificationHelper
 
 data class LimaPlace(val name: String, val lat: Double, val lng: Double)
 
@@ -60,15 +64,45 @@ val recommendedPlaces = listOf(
 @Composable
 fun MainScreen(
     incidentRepository: IncidentReportRepository,
-    onNavigateToReport: () -> Unit,
-    viewModel: MainViewModel = viewModel()
+    onNavigateToReport: () -> Unit
 ) {
+    val context = LocalContext.current
+    val notificationHelper = remember(context) { 
+        val helper = NotificationHelper(context)
+        android.util.Log.d("MainScreen", "🔔 NotificationHelper creado")
+        helper
+    }
+    val geofenceManager = remember(context) { 
+        val manager = GeofenceManager(context)
+        android.util.Log.d("MainScreen", "🗺️ GeofenceManager creado")
+        manager
+    }
+    
+    // Crear ViewModel CON GeofenceManager desde el inicio
+    val viewModel = remember(geofenceManager, notificationHelper) {
+        android.util.Log.d("MainScreen", "🎬 Creando MainViewModel...")
+        MainViewModel(
+            notificationHelper = notificationHelper,
+            getLatestAlertsUseCase = null,
+            geofenceManager = geofenceManager
+        )
+    }
+    
     val uiState by viewModel.uiState.collectAsState()
     val incidentReports by incidentRepository.getReports().collectAsState(initial = emptyList())
-    val context = LocalContext.current
     val locationProvider = remember(context) { DeviceLocationProvider(context) }
     var deviceCoordinates by remember { mutableStateOf<DeviceCoordinates?>(null) }
     var destinationText by remember { mutableStateOf("") }
+
+    android.util.Log.d("MainScreen", "✅ MainScreen composición completa")
+
+    // Actualizar geofences cuando cambien los reportes
+    LaunchedEffect(incidentReports) {
+        if (incidentReports.isNotEmpty()) {
+            android.util.Log.d("MainScreen", "📱 Reportes recibidos: ${incidentReports.size}")
+            viewModel.updateAlertsFromReports(incidentReports)
+        }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -79,22 +113,51 @@ fun MainScreen(
         if (granted) {
             locationProvider.getCurrentCoordinates { coordinates ->
                 deviceCoordinates = coordinates
-                coordinates?.let { viewModel.onLocationUpdated(it.latitude, it.longitude) }
             }
         }
     }
 
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            android.util.Log.d("MainScreen", "✅ Permiso de notificaciones CONCEDIDO")
+        } else {
+            android.util.Log.d("MainScreen", "❌ Permiso de notificaciones DENEGADO")
+        }
+    }
+
     LaunchedEffect(Unit) {
+        // Solicitar permisos de notificación (Android 13+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        
+        // Solicitar permisos de ubicación
         if (locationProvider.hasLocationPermission()) {
+            // Obtener ubicación inicial
             locationProvider.getCurrentCoordinates { coordinates ->
                 deviceCoordinates = coordinates
+                android.util.Log.d("MainScreen", "📍 Ubicación inicial: ${coordinates?.latitude}, ${coordinates?.longitude}")
                 coordinates?.let { viewModel.onLocationUpdated(it.latitude, it.longitude) }
+            }
+
+            // Actualizar ubicación cada 5 segundos
+            while (true) {
+                delay(5000)
+                locationProvider.getCurrentCoordinates { coordinates ->
+                    if (coordinates != null) {
+                        deviceCoordinates = coordinates
+                        viewModel.onLocationUpdated(coordinates.latitude, coordinates.longitude)
+                    }
+                }
             }
         } else {
             permissionLauncher.launch(
                 arrayOf(
                     Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                    Manifest.permission.ACCESS_BACKGROUND_LOCATION
                 )
             )
         }
@@ -332,11 +395,12 @@ fun ProximityAlertCard(alert: Alert, onDismiss: () -> Unit) {
                     fontWeight = FontWeight.Black
                 )
                 Text(
-                    text = alert.description,
+                    text = alert.title,
                     style = MaterialTheme.typography.bodySmall,
                     color = Color.White,
                     maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    fontWeight = FontWeight.SemiBold
                 )
             }
             IconButton(onClick = onDismiss) {

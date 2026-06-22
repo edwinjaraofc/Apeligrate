@@ -18,3 +18,20 @@ data class IncidentReport(
     val falseCount: Int = 0,
     val persistenceMessage: String = "" // e.g., "42 reportes similares"
 )
+
+fun String.isCritical(): Boolean {
+    return this == "Robo a mano armada" || this == "Hurto/Arrebato"
+}
+
+fun IncidentReport.toAlert(): Alert {
+    return Alert(
+        id = this.id,
+        title = this.category,
+        description = this.description,
+        severity = if (this.category.isCritical()) Severity.CRITICAL else Severity.WARNING,
+        timestamp = this.reportedAt,
+        latitude = this.latitude,
+        longitude = this.longitude
+    )
+}
+

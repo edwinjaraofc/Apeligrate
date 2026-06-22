@@ -70,6 +70,12 @@ dependencies {
 
     // DataStore Preferences
     implementation("androidx.datastore:datastore-preferences:1.1.0")
+    
+    // WorkManager
+    implementation(libs.androidx.work.runtime.ktx)
+
+    // Google Play Services Location (Geofencing)
+    implementation("com.google.android.gms:play-services-location:21.1.0")
 
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))

@@ -201,8 +201,7 @@ class MainActivity : ComponentActivity() {
                                                 when (selectedTab) {
                                                     SentinelTab.INICIO -> MainScreen(
                                                         incidentRepository = incidentRepository,
-                                                        onNavigateToReport = { selectedTab = SentinelTab.REPORTAR },
-                                                        viewModel = mainViewModel
+                                                        onNavigateToReport = { selectedTab = SentinelTab.REPORTAR }
                                                     )
                                                     SentinelTab.FEED -> {
                                                         val feedViewModel = remember { FeedViewModel(incidentRepository) }

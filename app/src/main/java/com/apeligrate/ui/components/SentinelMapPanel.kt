@@ -41,6 +41,8 @@ private data class MapMarker(
     val category: String = ""
 )
 
+data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
+
 private enum class MarkerKind {
     USER,
     REPORT,
@@ -135,17 +137,87 @@ fun SentinelMapPanel(
                             view.overlays.add(MapEventsOverlay(eventsReceiver))
                         }
                         
-                        // Radios de reportes
-                        markers.filter { it.kind == MarkerKind.REPORT }.forEach { point ->
-                            val colorInt = getCategoryColor(point.category)
-                            val circlePoints = Polygon.pointsAsCircle(GeoPoint(point.latitude, point.longitude), 200.0)
-                            val circle = Polygon(view).apply {
-                                points = circlePoints
-                                fillColor = android.graphics.Color.argb(40, android.graphics.Color.red(colorInt), android.graphics.Color.green(colorInt), android.graphics.Color.blue(colorInt))
-                                strokeColor = android.graphics.Color.argb(100, android.graphics.Color.red(colorInt), android.graphics.Color.green(colorInt), android.graphics.Color.blue(colorInt))
-                                strokeWidth = 2f
+                        // Radios de reportes con lógica de clustering
+                        val reportMarkersOnly = markers.filter { it.kind == MarkerKind.REPORT }
+                        val processedMarkers = mutableSetOf<String>()
+
+                        // Detectar clusters (3+ reportes en 150m)
+                        for (marker in reportMarkersOnly) {
+                            if (processedMarkers.contains("${marker.latitude}_${marker.longitude}")) continue
+
+                            // Encontrar reportes cercanos en 150m
+                            val cluster = reportMarkersOnly.filter { other ->
+                                val results = FloatArray(1)
+                                android.location.Location.distanceBetween(
+                                    marker.latitude, marker.longitude,
+                                    other.latitude, other.longitude,
+                                    results
+                                )
+                                results[0] < 150f
                             }
-                            view.overlays.add(circle)
+
+                            if (cluster.size >= 3) {
+                                // ES UN CLUSTER - Dibujar UN SOLO círculo que lo englobe
+
+                                // Calcular centro del cluster
+                                val centerLat = cluster.map { it.latitude }.average()
+                                val centerLng = cluster.map { it.longitude }.average()
+
+                                // Calcular radio necesario para envolver todos los puntos
+                                var maxDistance = 0.0
+                                for (point in cluster) {
+                                    val results = FloatArray(1)
+                                    android.location.Location.distanceBetween(
+                                        centerLat, centerLng,
+                                        point.latitude, point.longitude,
+                                        results
+                                    )
+                                    maxDistance = maxOf(maxDistance, results[0].toDouble())
+                                }
+
+                                // Radio adaptativo: máximo + margen
+                                val clusterRadius = maxDistance + 50.0
+
+                                // Color y estilos según cantidad de reportes
+                                val (alphaFill, strokeWidth, clusterColor) = when {
+                                    cluster.size >= 5 -> Triple(120, 6f, android.graphics.Color.parseColor("#CC0000")) // Rojo sangre
+                                    else -> Triple(100, 4f, android.graphics.Color.parseColor("#FF3333")) // Rojo intenso
+                                }
+
+                                val circlePoints = Polygon.pointsAsCircle(GeoPoint(centerLat, centerLng), clusterRadius)
+                                val circle = Polygon(view).apply {
+                                    points = circlePoints
+                                    fillColor = android.graphics.Color.argb(
+                                        alphaFill,
+                                        android.graphics.Color.red(clusterColor),
+                                        android.graphics.Color.green(clusterColor),
+                                        android.graphics.Color.blue(clusterColor)
+                                    )
+                                    strokeColor = if (cluster.size >= 5) {
+                                        android.graphics.Color.argb(200, 0, 0, 0) // Borde negro
+                                    } else {
+                                        android.graphics.Color.argb(120, android.graphics.Color.red(clusterColor), android.graphics.Color.green(clusterColor), android.graphics.Color.blue(clusterColor))
+                                    }
+                                    this.strokeWidth = strokeWidth
+                                }
+                                view.overlays.add(circle)
+
+                                // Marcar como procesados
+                                cluster.forEach { processedMarkers.add("${it.latitude}_${it.longitude}") }
+
+                            } else {
+                                // Reporte individual - Círculo pequeño
+                                val categoryColor = getCategoryColor(marker.category)
+                                val circlePoints = Polygon.pointsAsCircle(GeoPoint(marker.latitude, marker.longitude), 100.0)
+                                val circle = Polygon(view).apply {
+                                    points = circlePoints
+                                    fillColor = android.graphics.Color.argb(50, android.graphics.Color.red(categoryColor), android.graphics.Color.green(categoryColor), android.graphics.Color.blue(categoryColor))
+                                    strokeColor = android.graphics.Color.argb(80, android.graphics.Color.red(categoryColor), android.graphics.Color.green(categoryColor), android.graphics.Color.blue(categoryColor))
+                                    this.strokeWidth = 2f
+                                }
+                                view.overlays.add(circle)
+                                processedMarkers.add("${marker.latitude}_${marker.longitude}")
+                            }
                         }
 
                         // Marcadores
