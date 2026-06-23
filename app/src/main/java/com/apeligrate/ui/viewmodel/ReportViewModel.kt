@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.apeligrate.data.local.DeviceCoordinates
 import com.apeligrate.domain.model.IncidentReport
+import com.apeligrate.domain.repository.UserProgressRepository
 import com.apeligrate.domain.use_case.SubmitIncidentReportUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,7 +26,8 @@ data class ReportUiState(
 )
 
 class ReportViewModel(
-    private val submitIncidentReportUseCase: SubmitIncidentReportUseCase
+    private val submitIncidentReportUseCase: SubmitIncidentReportUseCase,
+    private val userProgressRepository: UserProgressRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ReportUiState())
@@ -99,6 +101,9 @@ class ReportViewModel(
             val result = submitIncidentReportUseCase(report)
 
             result.onSuccess { submittedReport ->
+                viewModelScope.launch {
+                    userProgressRepository.recordSubmittedReport(userId)
+                }
                 _uiState.update {
                     it.copy(
                         isLoading = false,

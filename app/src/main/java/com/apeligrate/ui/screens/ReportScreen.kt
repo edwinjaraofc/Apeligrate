@@ -39,6 +39,7 @@ import com.apeligrate.data.local.DeviceCoordinates
 import com.apeligrate.data.local.DeviceLocationProvider
 import com.apeligrate.data.local.SessionManager
 import com.apeligrate.domain.repository.IncidentReportRepository
+import com.apeligrate.domain.repository.UserProgressRepository
 import com.apeligrate.domain.use_case.SubmitIncidentReportUseCase
 import com.apeligrate.ui.components.GlassPanel
 import com.apeligrate.ui.components.SentinelMapPanel
@@ -55,6 +56,7 @@ import java.util.Locale
 @Composable
 fun ReportScreen(
     repository: IncidentReportRepository,
+    userProgressRepository: UserProgressRepository,
     onReportSubmitted: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -64,9 +66,9 @@ fun ReportScreen(
     var deviceCoordinates by remember { mutableStateOf<DeviceCoordinates?>(null) }
     var locationStatus by remember { mutableStateOf("Detectando tu ubicación...") }
 
-    val reportViewModel = remember(repository) {
+    val reportViewModel = remember(repository, userProgressRepository) {
         val useCase = SubmitIncidentReportUseCase(repository)
-        ReportViewModel(useCase)
+        ReportViewModel(useCase, userProgressRepository)
     }
 
     val uiState by reportViewModel.uiState.collectAsState()

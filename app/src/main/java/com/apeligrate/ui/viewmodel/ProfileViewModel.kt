@@ -2,11 +2,13 @@ package com.apeligrate.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.apeligrate.domain.model.Achievement
 import com.apeligrate.domain.model.User
+import com.apeligrate.domain.repository.UserProgressRepository
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -19,86 +21,28 @@ data class ProfileUiState(
     val error: String? = null
 )
 
-class ProfileViewModel : ViewModel() {
+class ProfileViewModel(
+    private val userProgressRepository: UserProgressRepository
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ProfileUiState())
     val uiState: StateFlow<ProfileUiState> = _uiState.asStateFlow()
+    private var profileJob: Job? = null
 
     fun loadUserProfile(userId: String) {
-        viewModelScope.launch {
+        profileJob?.cancel()
+        profileJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            
-            val mockUser = if (userId == "2") {
-                User(
-                    id = "2",
-                    name = "María García",
-                    email = "maria.garcia@example.com",
-                    profileImageUrl = "https://randomuser.me/api/portraits/women/44.jpg",
-                    city = "Guadalajara, MX",
-                    isVerified = true,
-                    level = 12,
-                    experience = 1250,
-                    nextLevelExperience = 2000,
-                    reputationTitle = "Guardián de Élite",
-                    reportsCount = 89,
-                    validationsCount = 450,
-                    achievements = listOf(
-                        Achievement(
-                            id = "4",
-                            title = "Ojo de Halcón",
-                            description = "Detectó 50 incidentes en menos de 1 hora.",
-                            iconName = "visibility",
-                            colorHex = "#4FC3F7"
-                        ),
-                        Achievement(
-                            id = "5",
-                            title = "Veterana",
-                            description = "Más de 1 año protegiendo la comunidad.",
-                            iconName = "star",
-                            colorHex = "#FFD54F"
-                        )
+            userProgressRepository.ensureUser(userId)
+            userProgressRepository.getUser(userId).collectLatest { user ->
+                _uiState.update {
+                    it.copy(
+                        user = user,
+                        isLoading = false,
+                        editName = user?.name.orEmpty(),
+                        editCity = user?.city.orEmpty()
                     )
-                )
-            } else {
-                User(
-                    id = "1",
-                    name = "Juan Pérez",
-                    email = "juan.perez@example.com",
-                    profileImageUrl = null,
-                    city = "Ciudad de México, MX",
-                    isVerified = true,
-                    level = 8,
-                    experience = 880,
-                    nextLevelExperience = 1000,
-                    reputationTitle = "Protector",
-                    reportsCount = 45,
-                    validationsCount = 120,
-                    achievements = listOf(
-                        Achievement(
-                            id = "1",
-                            title = "Vigilante",
-                            description = "Por detectar 20 incidentes críticos en tiempo real.",
-                            iconName = "visibility",
-                            colorHex = "#FF5252"
-                        ),
-                        Achievement(
-                            id = "2",
-                            title = "Colaborador",
-                            description = "Validó 100 reportes de la comunidad local.",
-                            iconName = "diamond",
-                            colorHex = "#FFC107"
-                        )
-                    )
-                )
-            }
-            
-            _uiState.update { 
-                it.copy(
-                    user = mockUser, 
-                    isLoading = false,
-                    editName = mockUser.name,
-                    editCity = mockUser.city
-                ) 
+                }
             }
         }
     }
@@ -118,21 +62,23 @@ class ProfileViewModel : ViewModel() {
     fun saveProfile() {
         val currentState = _uiState.value
         val user = currentState.user ?: return
-        
+
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            
-            val updatedUser = user.copy(
+            userProgressRepository.saveProfile(
+                userId = user.id,
                 name = currentState.editName,
                 city = currentState.editCity
             )
-            
-            _uiState.update { 
+            _uiState.update {
                 it.copy(
-                    user = updatedUser,
+                    user = user.copy(
+                        name = currentState.editName,
+                        city = currentState.editCity
+                    ),
                     isLoading = false,
                     isEditing = false
-                ) 
+                )
             }
         }
     }

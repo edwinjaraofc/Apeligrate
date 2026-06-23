@@ -24,7 +24,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.toColorInt
-import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.apeligrate.data.local.SessionManager
 import com.apeligrate.domain.model.Achievement
@@ -35,7 +34,7 @@ import com.apeligrate.ui.viewmodel.ProfileViewModel
 
 @Composable
 fun ProfileScreen(
-    viewModel: ProfileViewModel = viewModel()
+    viewModel: ProfileViewModel
 ) {
     val context = LocalContext.current
     val sessionManager = remember { SessionManager(context) }

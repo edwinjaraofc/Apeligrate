@@ -8,8 +8,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -27,14 +25,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import com.apeligrate.data.local.DeviceCoordinates
 import com.apeligrate.data.local.DeviceLocationProvider
@@ -67,39 +63,37 @@ fun MainScreen(
     onNavigateToReport: () -> Unit
 ) {
     val context = LocalContext.current
-    val notificationHelper = remember(context) { 
+    val notificationHelper = remember(context) {
         val helper = NotificationHelper(context)
-        android.util.Log.d("MainScreen", "🔔 NotificationHelper creado")
+        android.util.Log.d("MainScreen", "NotificationHelper creado")
         helper
     }
-    val geofenceManager = remember(context) { 
+    val geofenceManager = remember(context) {
         val manager = GeofenceManager(context)
-        android.util.Log.d("MainScreen", "🗺️ GeofenceManager creado")
+        android.util.Log.d("MainScreen", "GeofenceManager creado")
         manager
     }
-    
-    // Crear ViewModel CON GeofenceManager desde el inicio
+
     val viewModel = remember(geofenceManager, notificationHelper) {
-        android.util.Log.d("MainScreen", "🎬 Creando MainViewModel...")
+        android.util.Log.d("MainScreen", "Creando MainViewModel...")
         MainViewModel(
             notificationHelper = notificationHelper,
             getLatestAlertsUseCase = null,
             geofenceManager = geofenceManager
         )
     }
-    
+
     val uiState by viewModel.uiState.collectAsState()
     val incidentReports by incidentRepository.getReports().collectAsState(initial = emptyList())
     val locationProvider = remember(context) { DeviceLocationProvider(context) }
     var deviceCoordinates by remember { mutableStateOf<DeviceCoordinates?>(null) }
     var destinationText by remember { mutableStateOf("") }
 
-    android.util.Log.d("MainScreen", "✅ MainScreen composición completa")
+    android.util.Log.d("MainScreen", "MainScreen composicion completa")
 
-    // Actualizar geofences cuando cambien los reportes
     LaunchedEffect(incidentReports) {
         if (incidentReports.isNotEmpty()) {
-            android.util.Log.d("MainScreen", "📱 Reportes recibidos: ${incidentReports.size}")
+            android.util.Log.d("MainScreen", "Reportes recibidos: ${incidentReports.size}")
             viewModel.updateAlertsFromReports(incidentReports)
         }
     }
@@ -121,28 +115,24 @@ fun MainScreen(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-            android.util.Log.d("MainScreen", "✅ Permiso de notificaciones CONCEDIDO")
+            android.util.Log.d("MainScreen", "Permiso de notificaciones CONCEDIDO")
         } else {
-            android.util.Log.d("MainScreen", "❌ Permiso de notificaciones DENEGADO")
+            android.util.Log.d("MainScreen", "Permiso de notificaciones DENEGADO")
         }
     }
 
     LaunchedEffect(Unit) {
-        // Solicitar permisos de notificación (Android 13+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-        
-        // Solicitar permisos de ubicación
+
         if (locationProvider.hasLocationPermission()) {
-            // Obtener ubicación inicial
             locationProvider.getCurrentCoordinates { coordinates ->
                 deviceCoordinates = coordinates
-                android.util.Log.d("MainScreen", "📍 Ubicación inicial: ${coordinates?.latitude}, ${coordinates?.longitude}")
+                android.util.Log.d("MainScreen", "Ubicacion inicial: ${coordinates?.latitude}, ${coordinates?.longitude}")
                 coordinates?.let { viewModel.onLocationUpdated(it.latitude, it.longitude) }
             }
 
-            // Actualizar ubicación cada 5 segundos
             while (true) {
                 delay(5000)
                 locationProvider.getCurrentCoordinates { coordinates ->
@@ -164,200 +154,201 @@ fun MainScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        Column(
+        LazyColumn(
             modifier = Modifier
-                .padding(16.dp)
+                .padding(horizontal = 16.dp)
                 .fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(top = 16.dp, bottom = 24.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "SENTINEL SYSTEM",
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = 2.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = "ESTADO: VIGILANCIA ACTIVA",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = SafeGreen,
-                    )
-                }
-                
-                Surface(
-                    onClick = { viewModel.triggerTestNotification() },
-                    color = Color.White.copy(alpha = 0.1f),
-                    shape = CircleShape,
-                    modifier = Modifier.size(48.dp)
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.NotificationsActive,
-                            contentDescription = "Test Alerta",
-                            tint = Color(0xFFFF5252),
-                            modifier = Modifier.size(24.dp)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "SENTINEL SYSTEM",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 2.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
+                        Text(
+                            text = "ESTADO: VIGILANCIA ACTIVA",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = SafeGreen,
+                        )
+                    }
+
+                    Surface(
+                        onClick = { viewModel.triggerTestNotification() },
+                        color = Color.White.copy(alpha = 0.1f),
+                        shape = CircleShape,
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.NotificationsActive,
+                                contentDescription = "Test Alerta",
+                                tint = Color(0xFFFF5252),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Destination Search Bar
-            OutlinedTextField(
-                value = destinationText,
-                onValueChange = { destinationText = it },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("¿A dónde vas?", color = Color.Gray) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.Gray) },
-                trailingIcon = {
-                    if (destinationText.isNotEmpty() || uiState.destination != null) {
-                        IconButton(onClick = { 
-                            destinationText = "" 
-                            viewModel.clearRoute()
-                        }) {
-                            Icon(Icons.Default.Clear, contentDescription = null, tint = Color.Gray)
+            item {
+                OutlinedTextField(
+                    value = destinationText,
+                    onValueChange = { destinationText = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("A donde vas?", color = Color.Gray) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.Gray) },
+                    trailingIcon = {
+                        if (destinationText.isNotEmpty() || uiState.destination != null) {
+                            IconButton(onClick = {
+                                destinationText = ""
+                                viewModel.clearRoute()
+                            }) {
+                                Icon(Icons.Default.Clear, contentDescription = null, tint = Color.Gray)
+                            }
                         }
-                    }
-                },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
-                    focusedContainerColor = Color.White.copy(alpha = 0.05f),
-                    unfocusedContainerColor = Color.White.copy(alpha = 0.05f),
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
-                ),
-                shape = RoundedCornerShape(12.dp),
-                singleLine = true
-            )
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
+                        focusedContainerColor = Color.White.copy(alpha = 0.05f),
+                        unfocusedContainerColor = Color.White.copy(alpha = 0.05f),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true
+                )
+            }
 
-            // Recommended Places in Lima
             if (uiState.destination == null) {
-                Spacer(modifier = Modifier.height(8.dp))
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(recommendedPlaces) { place ->
-                        SuggestionChip(
-                            onClick = { 
-                                destinationText = place.name
-                                viewModel.setDestination(place.lat, place.lng)
-                            },
-                            label = { Text(place.name, color = Color.White, maxLines = 1) },
-                            colors = SuggestionChipDefaults.suggestionChipColors(
-                                containerColor = Color.White.copy(alpha = 0.05f)
-                            ),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
-                        )
+                item {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(recommendedPlaces) { place ->
+                            SuggestionChip(
+                                onClick = {
+                                    destinationText = place.name
+                                    viewModel.setDestination(place.lat, place.lng)
+                                },
+                                label = { Text(place.name, color = Color.White, maxLines = 1) },
+                                colors = SuggestionChipDefaults.suggestionChipColors(
+                                    containerColor = Color.White.copy(alpha = 0.05f)
+                                ),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+                            )
+                        }
                     }
                 }
             }
 
             if (destinationText.isNotEmpty() && uiState.destination == null) {
-                Button(
-                    onClick = {
-                        // Mock destination coordinates near current user or a fixed point
-                        deviceCoordinates?.let {
-                            viewModel.setDestination(it.latitude + 0.005, it.longitude + 0.005)
-                        } ?: viewModel.setDestination(-12.0673, -77.0336)
-                    },
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                ) {
-                    Icon(Icons.Default.Directions, contentDescription = null, tint = Color.Black)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Trazar Ruta Segura", fontWeight = FontWeight.Bold, color = Color.Black)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Danger Route Warning
-            AnimatedVisibility(visible = uiState.dangerOnRoute) {
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0x33FF5252)),
-                    border = BorderStroke(1.dp, Color(0xFFFF5252))
-                ) {
-                    Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFF5252))
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            "¡Ruta en riesgo! Se detectaron áreas peligrosas en el camino.",
-                            color = Color.White,
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                item {
+                    Button(
+                        onClick = {
+                            deviceCoordinates?.let {
+                                viewModel.setDestination(it.latitude + 0.005, it.longitude + 0.005)
+                            } ?: viewModel.setDestination(-12.0673, -77.0336)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Icon(Icons.Default.Directions, contentDescription = null, tint = Color.Black)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Trazar Ruta Segura", fontWeight = FontWeight.Bold, color = Color.Black)
                     }
                 }
             }
 
-            SentinelMapPanel(
-                centerCoordinates = uiState.focusedLocation ?: deviceCoordinates,
-                reportMarkers = incidentReports,
-                routePoints = uiState.routePoints,
-                destination = uiState.destination,
-                title = if (uiState.destination != null) "Navegación Activa" else "Mapa de vigilancia",
-                subtitle = if (uiState.dangerOnRoute) "Evita las zonas marcadas en rojo." else "Ruta despejada hasta el destino."
-            )
-            
+            if (uiState.dangerOnRoute) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Color(0x33FF5252)),
+                        border = BorderStroke(1.dp, Color(0xFFFF5252))
+                    ) {
+                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFF5252))
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                "Ruta en riesgo! Se detectaron areas peligrosas en el camino.",
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                SentinelMapPanel(
+                    centerCoordinates = uiState.focusedLocation ?: deviceCoordinates,
+                    reportMarkers = incidentReports,
+                    routePoints = uiState.routePoints,
+                    destination = uiState.destination,
+                    title = if (uiState.destination != null) "Navegacion Activa" else "Mapa de vigilancia",
+                    subtitle = if (uiState.dangerOnRoute) "Evita las zonas marcadas en rojo." else "Ruta despejada hasta el destino."
+                )
+            }
+
             if (uiState.focusedLocation != null) {
-                TextButton(
-                    onClick = { viewModel.clearFocus() },
-                    modifier = Modifier.align(Alignment.End)
+                item {
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        TextButton(
+                            onClick = { viewModel.clearFocus() },
+                            modifier = Modifier.align(Alignment.CenterEnd)
+                        ) {
+                            Text("Volver a mi ubicacion", color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+            }
+
+            item {
+                Text(
+                    text = "Alertas recientes",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            items(uiState.alerts, key = { alert -> alert.id }) { alert ->
+                AlertItem(alert)
+            }
+
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Text("Volver a mi ubicación", color = MaterialTheme.colorScheme.primary)
+                    SentinelButton(
+                        text = "EMERGENCIA",
+                        onClick = onNavigateToReport,
+                        modifier = Modifier.weight(1f),
+                    )
+                    SentinelButton(
+                        text = "REPORTAR",
+                        onClick = onNavigateToReport,
+                        modifier = Modifier.weight(1f),
+                        isPrimary = false,
+                    )
                 }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Text(
-                text = "Alertas recientes",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Bold
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                items(uiState.alerts) { alert ->
-                    AlertItem(alert)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                SentinelButton(
-                    text = "EMERGENCIA",
-                    onClick = onNavigateToReport,
-                    modifier = Modifier.weight(1f),
-                )
-                SentinelButton(
-                    text = "REPORTAR",
-                    onClick = onNavigateToReport,
-                    modifier = Modifier.weight(1f),
-                    isPrimary = false,
-                )
             }
         }
 
-        // In-App Proximity Alert
         AnimatedVisibility(
             visible = uiState.proximityAlert != null,
             enter = fadeIn(),
@@ -389,7 +380,7 @@ fun ProximityAlertCard(alert: Alert, onDismiss: () -> Unit) {
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "¡ALERTA CERCANA!",
+                    text = "ALERTA CERCANA!",
                     style = MaterialTheme.typography.labelLarge,
                     color = Color.White,
                     fontWeight = FontWeight.Black
