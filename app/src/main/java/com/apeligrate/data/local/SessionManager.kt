@@ -26,15 +26,16 @@ class SessionManager(private val context: Context) {
     }
 
     val userIdFlow: Flow<String?> = context.sessionDataStore.data.map { prefs ->
-        val userId = prefs[Keys.USER_ID]
+        val userId = prefs[Keys.USER_ID]?.normalizeUserId()
         Log.d(TAG, "Reading userId from DataStore: $userId")
         userId
     }
 
     suspend fun setSession(userId: String) {
-        Log.d(TAG, "Saving session: userId=$userId, isLoggedIn=true")
+        val normalizedUserId = userId.normalizeUserId()
+        Log.d(TAG, "Saving session: userId=$normalizedUserId, isLoggedIn=true")
         context.sessionDataStore.edit { prefs ->
-            prefs[Keys.USER_ID] = userId
+            prefs[Keys.USER_ID] = normalizedUserId
             prefs[Keys.IS_LOGGED_IN] = true
             Log.d(TAG, "Session saved successfully")
         }
@@ -47,6 +48,15 @@ class SessionManager(private val context: Context) {
             prefs[Keys.IS_LOGGED_IN] = false
             Log.d(TAG, "Session cleared successfully")
         }
+    }
+}
+
+private fun String.normalizeUserId(): String {
+    val numericValue = this.toDoubleOrNull() ?: return this
+    return if (numericValue % 1.0 == 0.0) {
+        numericValue.toLong().toString()
+    } else {
+        this
     }
 }
 

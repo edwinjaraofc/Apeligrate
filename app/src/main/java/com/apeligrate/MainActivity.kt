@@ -45,6 +45,7 @@ import com.apeligrate.domain.model.Contact
 import com.apeligrate.domain.model.IncidentReport
 import com.apeligrate.domain.model.User
 import com.apeligrate.domain.repository.IncidentReportRepository
+import com.apeligrate.domain.repository.UserProgressRepository
 import com.apeligrate.domain.use_case.PerformLoginUseCase
 import com.apeligrate.domain.use_case.RegisterUserUseCase
 import com.apeligrate.ui.components.SentinelBackground
@@ -68,6 +69,7 @@ class MainActivity : ComponentActivity() {
     private val sessionManager by lazy { com.apeligrate.data.local.SessionManager(this.applicationContext) }
     private val authRepository by lazy { com.apeligrate.data.repository.RemoteAuthRepository(sessionManager) }
     private val incidentRepository by lazy { com.apeligrate.data.repository.IncidentReportRepositoryImpl() }
+    private val userProgressRepository: UserProgressRepository by lazy { com.apeligrate.data.repository.SupabaseUserProgressRepository() }
     
     private val loginUseCase by lazy { PerformLoginUseCase(authRepository) }
     private val registerUseCase by lazy { RegisterUserUseCase(authRepository) }
@@ -118,11 +120,14 @@ class MainActivity : ComponentActivity() {
                         }
                         "main" -> {
                             val mainViewModel: MainViewModel = viewModel()
-                            val profileViewModel: ProfileViewModel = viewModel()
+                            val profileViewModel = remember { ProfileViewModel(userProgressRepository) }
                             val userId by sessionManager.userIdFlow.collectAsState(initial = null)
                             
                             LaunchedEffect(userId) {
-                                userId?.let { profileViewModel.loadUserProfile(it) }
+                                userId?.let {
+                                    userProgressRepository.ensureUser(it)
+                                    profileViewModel.loadUserProfile(it)
+                                }
                             }
 
                             ModalNavigationDrawer(
@@ -204,7 +209,13 @@ class MainActivity : ComponentActivity() {
                                                         onNavigateToReport = { selectedTab = SentinelTab.REPORTAR }
                                                     )
                                                     SentinelTab.FEED -> {
-                                                        val feedViewModel = remember { FeedViewModel(incidentRepository) }
+                                                        val feedViewModel = remember(userId) {
+                                                            FeedViewModel(
+                                                                repository = incidentRepository,
+                                                                userProgressRepository = userProgressRepository,
+                                                                currentUserId = userId
+                                                            )
+                                                        }
                                                         FeedScreen(
                                                             viewModel = feedViewModel,
                                                             onReportClick = { report ->
@@ -214,9 +225,10 @@ class MainActivity : ComponentActivity() {
                                                     }
                                                     SentinelTab.REPORTAR -> ReportScreen(
                                                         repository = incidentRepository,
+                                                        userProgressRepository = userProgressRepository,
                                                         onReportSubmitted = { selectedTab = SentinelTab.INICIO }
                                                     )
-                                                    SentinelTab.PERFIL -> ProfileScreen()
+                                                    SentinelTab.PERFIL -> ProfileScreen(viewModel = profileViewModel)
                                                 }
                                             }
                                         }

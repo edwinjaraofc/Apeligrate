@@ -16,6 +16,8 @@ data class IncidentReport(
     // Feed specifics
     val validationCount: Int = 0,
     val falseCount: Int = 0,
+    val validationVoterIds: List<String> = emptyList(),
+    val falseVoterIds: List<String> = emptyList(),
     val persistenceMessage: String = "" // e.g., "42 reportes similares"
 )
 

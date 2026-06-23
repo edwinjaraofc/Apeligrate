@@ -76,8 +76,29 @@ class RemoteAuthRepository(private val sessionManager: SessionManager) : AuthRep
                 val name = first["name"]?.toString() ?: ""
                 val email = first["email"]?.toString() ?: credentials.email
                 val profile = first["profile_image_url"]?.toString()
+                val city = first["city"]?.toString().orEmpty()
+                val isVerified = first["is_verified"] as? Boolean ?: false
+                val experience = first["experience"]?.toString()?.toIntOrNull() ?: 0
+                val level = first["level"]?.toString()?.toIntOrNull() ?: 1
+                val nextLevelExperience = first["next_level_experience"]?.toString()?.toIntOrNull() ?: 100
+                val reputationTitle = first["reputation_title"]?.toString() ?: "Iniciante"
+                val reportsCount = first["reports_count"]?.toString()?.toIntOrNull() ?: 0
+                val validationsCount = first["validations_count"]?.toString()?.toIntOrNull() ?: 0
 
-                val user = User(id = id, name = if (name.isNotBlank()) name else "Usuario", email = email, profileImageUrl = profile)
+                val user = User(
+                    id = id,
+                    name = if (name.isNotBlank()) name else "Usuario",
+                    email = email,
+                    profileImageUrl = profile,
+                    city = city,
+                    isVerified = isVerified,
+                    experience = experience,
+                    level = level,
+                    nextLevelExperience = nextLevelExperience,
+                    reputationTitle = reputationTitle,
+                    reportsCount = reportsCount,
+                    validationsCount = validationsCount
+                )
                 _currentUser.value = user
                 Result.success(user)
             } else {
@@ -111,8 +132,29 @@ class RemoteAuthRepository(private val sessionManager: SessionManager) : AuthRep
                 val respName = created["name"]?.toString() ?: name
                 val respEmail = created["email"]?.toString() ?: credentials.email
                 val profile = created["profile_image_url"]?.toString() ?: credentials.profileImageUrl
+                val city = created["city"]?.toString().orEmpty()
+                val isVerified = created["is_verified"] as? Boolean ?: false
+                val experience = created["experience"]?.toString()?.toIntOrNull() ?: 0
+                val level = created["level"]?.toString()?.toIntOrNull() ?: 1
+                val nextLevelExperience = created["next_level_experience"]?.toString()?.toIntOrNull() ?: 100
+                val reputationTitle = created["reputation_title"]?.toString() ?: "Iniciante"
+                val reportsCount = created["reports_count"]?.toString()?.toIntOrNull() ?: 0
+                val validationsCount = created["validations_count"]?.toString()?.toIntOrNull() ?: 0
 
-                val user = User(id = id, name = respName, email = respEmail, profileImageUrl = profile)
+                val user = User(
+                    id = id,
+                    name = respName,
+                    email = respEmail,
+                    profileImageUrl = profile,
+                    city = city,
+                    isVerified = isVerified,
+                    experience = experience,
+                    level = level,
+                    nextLevelExperience = nextLevelExperience,
+                    reputationTitle = reputationTitle,
+                    reportsCount = reportsCount,
+                    validationsCount = validationsCount
+                )
                 _currentUser.value = user
                 Result.success(user)
             } catch (e: Exception) {

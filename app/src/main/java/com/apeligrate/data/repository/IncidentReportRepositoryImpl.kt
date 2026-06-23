@@ -2,10 +2,13 @@ package com.apeligrate.data.repository
 
 import android.util.Log
 import com.apeligrate.data.remote.BackendConfig
+import com.apeligrate.data.remote.CreateReportVoteRequest
 import com.apeligrate.data.remote.CreateIncidentReportRequest
 import com.apeligrate.data.remote.SentinelApiService
+import com.apeligrate.data.remote.UpdateIncidentReportRequest
 import com.apeligrate.domain.model.IncidentReport
 import com.apeligrate.domain.repository.IncidentReportRepository
+import com.apeligrate.domain.repository.VoteReportResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -21,6 +24,7 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
 private const val TAG = "IncidentReportRepo"
+private const val FALSE_REPORT_THRESHOLD = 10
 
 class IncidentReportRepositoryImpl : IncidentReportRepository {
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -100,10 +104,104 @@ class IncidentReportRepositoryImpl : IncidentReportRepository {
         return reportsFlow.map { reports -> reports.find { it.id == id } }
     }
 
+    override suspend fun voteReport(reportId: String, userId: String, isReal: Boolean): VoteReportResult {
+        val normalizedUserId = userId.normalizeUserId()
+        if (normalizedUserId.isBlank()) {
+            return VoteReportResult(accepted = false, errorMessage = "Debes iniciar sesión para votar.")
+        }
+
+        val numericUserId = normalizedUserId.toLongOrNull()
+            ?: return VoteReportResult(accepted = false, errorMessage = "Tu sesión es inválida. Vuelve a iniciar sesión.")
+
+        return withContext(Dispatchers.IO) {
+            try {
+                val currentReport = reportsFlow.value.find { it.id == reportId }
+                if (currentReport?.status == "cancelled") {
+                    return@withContext VoteReportResult(
+                        accepted = false,
+                        errorMessage = "Este reporte ya fue cancelado."
+                    )
+                }
+
+                val existingVotes = api.getReportVotes(
+                    reportId = "eq.$reportId",
+                    userId = "eq.$numericUserId"
+                )
+                if (existingVotes.isNotEmpty()) {
+                    return@withContext VoteReportResult(
+                        accepted = false,
+                        errorMessage = "Ya votaste en este reporte."
+                    )
+                }
+
+                api.createReportVote(
+                    CreateReportVoteRequest(
+                        report_id = reportId,
+                        user_id = numericUserId,
+                        vote_type = if (isReal) "real" else "false"
+                    )
+                )
+
+                val votes = api.getReportVotes(reportId = "eq.$reportId")
+                val falseVoterIds = votes
+                    .filter { it["vote_type"]?.toString() == "false" }
+                    .mapNotNull { it["user_id"]?.toString()?.normalizeUserId() }
+                    .distinct()
+                val validationCount = votes.count { it["vote_type"]?.toString() == "real" }
+                val falseCount = falseVoterIds.size
+                val reportCancelled = falseCount >= FALSE_REPORT_THRESHOLD
+
+                api.updateIncidentReport(
+                    id = "eq.$reportId",
+                    body = UpdateIncidentReportRequest(
+                        status = if (reportCancelled) "cancelled" else null,
+                        validation_count = validationCount,
+                        false_count = falseCount
+                    )
+                )
+
+                refreshReports()
+
+                VoteReportResult(
+                    accepted = true,
+                    reportCancelled = reportCancelled,
+                    rewardedUserIds = if (reportCancelled) falseVoterIds else emptyList()
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Error al votar reporte $reportId", e)
+                VoteReportResult(
+                    accepted = false,
+                    errorMessage = "No se pudo registrar tu voto. Intenta otra vez."
+                )
+            }
+        }
+    }
+
     private suspend fun refreshReports() {
         runCatching {
-            api.getIncidentReports().mapNotNull { raw ->
+            val reports = api.getIncidentReports().mapNotNull { raw ->
                 runCatching { raw.toIncidentReport() }.getOrNull()
+            }
+            val votesByReport = api.getReportVotes()
+                .groupBy { it["report_id"]?.toString().orEmpty() }
+
+            reports.map { report ->
+                val reportVotes = votesByReport[report.id].orEmpty()
+                val validationVoterIds = reportVotes
+                    .filter { it["vote_type"]?.toString() == "real" }
+                    .mapNotNull { it["user_id"]?.toString()?.normalizeUserId() }
+                    .distinct()
+                val falseVoterIds = reportVotes
+                    .filter { it["vote_type"]?.toString() == "false" }
+                    .mapNotNull { it["user_id"]?.toString()?.normalizeUserId() }
+                    .distinct()
+
+                report.copy(
+                    validationCount = validationVoterIds.size,
+                    falseCount = falseVoterIds.size,
+                    validationVoterIds = validationVoterIds,
+                    falseVoterIds = falseVoterIds
+                )
             }
         }.onSuccess { reports ->
             reportsFlow.value = reports
@@ -135,4 +233,13 @@ private fun Map<String, Any?>.toIncidentReport(): IncidentReport {
         falseCount = this["false_count"]?.toString()?.toIntOrNull() ?: 0,
         persistenceMessage = this["persistence_message"]?.toString().orEmpty()
     )
+}
+
+private fun String.normalizeUserId(): String {
+    val numericValue = this.toDoubleOrNull() ?: return this
+    return if (numericValue % 1.0 == 0.0) {
+        numericValue.toLong().toString()
+    } else {
+        this
+    }
 }
