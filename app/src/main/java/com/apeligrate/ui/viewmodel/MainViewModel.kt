@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import android.util.Log
 import com.apeligrate.data.local.DeviceCoordinates
+import com.apeligrate.data.remote.RouteService
 import com.apeligrate.domain.model.Alert
 import com.apeligrate.domain.model.Severity
 import com.apeligrate.domain.model.IncidentReport
@@ -12,6 +13,7 @@ import com.apeligrate.domain.model.toAlert
 import com.apeligrate.domain.use_case.GetLatestAlertsUseCase
 import com.apeligrate.util.NotificationHelper
 import com.apeligrate.util.GeofenceManager
+import com.apeligrate.util.PolylineUtil
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,21 +26,22 @@ data class MainUiState(
     val error: String? = null,
     val proximityAlert: Alert? = null,
     val focusedLocation: DeviceCoordinates? = null,
+    val userLocation: DeviceCoordinates? = null,
     val destination: DeviceCoordinates? = null,
-    val routePoints: List<DeviceCoordinates> = emptyList(),
+    val currentRoutePoints: List<DeviceCoordinates> = emptyList(),
     val dangerOnRoute: Boolean = false
 )
 
 class MainViewModel(
     private var notificationHelper: NotificationHelper? = null,
     private val getLatestAlertsUseCase: GetLatestAlertsUseCase? = null,
-    private var geofenceManager: GeofenceManager? = null
+    private var geofenceManager: GeofenceManager? = null,
+    private var routeService: RouteService? = null
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
 
     private val notifiedAlertIds = mutableSetOf<String>()
-    private var lastUserLocation: DeviceCoordinates? = null
 
     init {
         Log.d("MainViewModel", "🎬 INIT: ViewModel creado")
@@ -52,6 +55,18 @@ class MainViewModel(
 
     fun setNotificationHelper(helper: NotificationHelper) {
         this.notificationHelper = helper
+    }
+
+    fun setRouteService(service: RouteService) {
+        Log.d("MainViewModel", "📡 RouteService configurado")
+        this.routeService = service
+        
+        // Recalcular ruta si ya existe un destino y ubicación de usuario
+        val origin = _uiState.value.userLocation
+        val dest = _uiState.value.destination
+        if (origin != null && dest != null) {
+            calculateRoute(origin, dest)
+        }
     }
 
     fun updateAlertsFromReports(incidentReports: List<IncidentReport>) {
@@ -94,7 +109,8 @@ class MainViewModel(
     }
 
     fun onLocationUpdated(latitude: Double, longitude: Double) {
-        lastUserLocation = DeviceCoordinates(latitude, longitude)
+        val userLoc = DeviceCoordinates(latitude, longitude)
+        _uiState.update { it.copy(userLocation = userLoc) }
         checkProximity(latitude, longitude)
     }
 
@@ -109,7 +125,6 @@ class MainViewModel(
             val results = FloatArray(1)
             Location.distanceBetween(latitude, longitude, zone.latitude, zone.longitude, results)
 
-            // Radio de zona ultra-reducido a 15m
             if (results[0] <= 15) {
                 val firstCritical = zone.reports.firstOrNull { it.severity.name == "CRITICAL" }
                 alertToShow = firstCritical ?: zone.reports.first()
@@ -142,19 +157,65 @@ class MainViewModel(
     }
 
     fun setDestination(latitude: Double, longitude: Double) {
+        val origin = _uiState.value.userLocation
         val dest = DeviceCoordinates(latitude, longitude)
         _uiState.update { it.copy(destination = dest, focusedLocation = dest) }
-        calculateRoute(dest)
+        
+        Log.d("MainViewModel", "📍 Destino fijado: $latitude, $longitude")
+        
+        if (origin != null) {
+            calculateRoute(origin, dest)
+        } else {
+            // Si no hay origen, aún no podemos trazar por calles reales
+            calculateStraightRoute(dest, dest)
+        }
     }
 
-    private fun calculateRoute(dest: DeviceCoordinates) {
-        val start = lastUserLocation ?: return
-        val points = listOf(
-            DeviceCoordinates(start.latitude, start.longitude),
-            DeviceCoordinates((start.latitude + dest.latitude) / 2 + 0.0005, (start.longitude + dest.longitude) / 2 + 0.0005),
-            DeviceCoordinates(dest.latitude, dest.longitude)
-        )
-        _uiState.update { it.copy(routePoints = points) }
+    fun calculateRoute(destination: DeviceCoordinates) {
+        val origin = _uiState.value.userLocation ?: return
+        calculateRoute(origin, destination)
+    }
+
+    fun calculateRoute(origin: DeviceCoordinates, destination: DeviceCoordinates) {
+        if (routeService != null) {
+            Log.d("MainViewModel", "🛣️ Calculando ruta real (OSRM)...")
+            viewModelScope.launch {
+                try {
+                    val coordinates = "${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}"
+                    val response = routeService?.getRoute(coordinates)
+                    val encodedPolyline = response?.routes?.firstOrNull()?.geometry
+                    
+                    if (encodedPolyline != null) {
+                        Log.d("MainViewModel", "✅ Ruta obtenida con éxito")
+                        val points = PolylineUtil.decode(encodedPolyline)
+                        _uiState.update { it.copy(currentRoutePoints = points) }
+                        checkDangerOnRoute(points)
+                    } else {
+                        Log.w("MainViewModel", "⚠️ OSRM no devolvió geometría, usando línea recta")
+                        calculateStraightRoute(origin, destination)
+                    }
+                } catch (e: Exception) {
+                    Log.e("MainViewModel", "❌ Error calculando ruta por calles: ${e.message}")
+                    calculateStraightRoute(origin, destination)
+                }
+            }
+        } else {
+            Log.w("MainViewModel", "⚠️ RouteService nulo, usando línea recta")
+            calculateStraightRoute(origin, destination)
+        }
+    }
+
+    private fun calculateStraightRoute(start: DeviceCoordinates, dest: DeviceCoordinates) {
+        val points = if (start == dest) {
+            listOf(start)
+        } else {
+            listOf(
+                DeviceCoordinates(start.latitude, start.longitude),
+                DeviceCoordinates((start.latitude + dest.latitude) / 2, (start.longitude + dest.longitude) / 2),
+                DeviceCoordinates(dest.latitude, dest.longitude)
+            )
+        }
+        _uiState.update { it.copy(currentRoutePoints = points) }
         checkDangerOnRoute(points)
     }
 
@@ -167,7 +228,6 @@ class MainViewModel(
                 if (alert.latitude != null && alert.longitude != null) {
                     val results = FloatArray(1)
                     Location.distanceBetween(point.latitude, point.longitude, alert.latitude, alert.longitude, results)
-                    // Radio reducido a 8 metros para máxima precisión
                     if (results[0] < 8 && alert.severity == Severity.CRITICAL) {
                         dangerFound = true
                         break
@@ -184,7 +244,7 @@ class MainViewModel(
     }
 
     fun clearRoute() {
-        _uiState.update { it.copy(destination = null, routePoints = emptyList(), dangerOnRoute = false, focusedLocation = null) }
+        _uiState.update { it.copy(destination = null, currentRoutePoints = emptyList(), dangerOnRoute = false, focusedLocation = null) }
     }
 
     fun focusLocation(latitude: Double, longitude: Double) {

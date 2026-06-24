@@ -279,7 +279,7 @@ fun MainScreen(
                 SentinelMapPanel(
                     centerCoordinates = uiState.focusedLocation ?: deviceCoordinates,
                     reportMarkers = incidentReports,
-                    routePoints = uiState.routePoints,
+                    routePoints = uiState.currentRoutePoints,
                     destination = uiState.destination,
                     title = if (uiState.destination != null) "Navegacion Activa" else "Mapa de vigilancia",
                     subtitle = if (uiState.dangerOnRoute) "Evita las zonas marcadas en rojo." else "Ruta despejada hasta el destino."

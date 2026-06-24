@@ -41,6 +41,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import com.apeligrate.data.local.DeviceCoordinates
+import com.apeligrate.data.remote.RouteService
 import com.apeligrate.domain.model.Contact
 import com.apeligrate.domain.model.IncidentReport
 import com.apeligrate.domain.model.User
@@ -55,6 +57,8 @@ import com.apeligrate.ui.screens.*
 import com.apeligrate.ui.theme.ApeligrateTheme
 import com.apeligrate.ui.viewmodel.*
 import kotlinx.coroutines.launch
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -73,6 +77,14 @@ class MainActivity : ComponentActivity() {
     
     private val loginUseCase by lazy { PerformLoginUseCase(authRepository) }
     private val registerUseCase by lazy { RegisterUserUseCase(authRepository) }
+
+    private val routeService by lazy {
+        Retrofit.Builder()
+            .baseUrl("https://router.project-osrm.org/")
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(RouteService::class.java)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -128,6 +140,10 @@ class MainActivity : ComponentActivity() {
                                     userProgressRepository.ensureUser(it)
                                     profileViewModel.loadUserProfile(it)
                                 }
+                            }
+
+                            LaunchedEffect(Unit) {
+                                mainViewModel.setRouteService(routeService)
                             }
 
                             ModalNavigationDrawer(
@@ -187,7 +203,9 @@ class MainActivity : ComponentActivity() {
                                                     onBack = { detailReport = null },
                                                     onShowOnMap = {
                                                         if (detailReport!!.latitude != null && detailReport!!.longitude != null) {
-                                                            mainViewModel.focusLocation(detailReport!!.latitude!!, detailReport!!.longitude!!)
+                                                            mainViewModel.calculateRoute(
+                                                                DeviceCoordinates(detailReport!!.latitude!!, detailReport!!.longitude!!)
+                                                            )
                                                             selectedTab = SentinelTab.INICIO
                                                             detailReport = null
                                                         }
