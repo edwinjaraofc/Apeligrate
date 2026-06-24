@@ -132,7 +132,7 @@ class MainActivity : ComponentActivity() {
 
                             ModalNavigationDrawer(
                                 drawerState = drawerState,
-                                gesturesEnabled = false, // DESACTIVA EL SWIPE PARA EL MENÚ
+                                gesturesEnabled = false,
                                 drawerContent = {
                                     SentinelDrawerContent(
                                         user = profileViewModel.uiState.collectAsState().value.user,
@@ -169,7 +169,6 @@ class MainActivity : ComponentActivity() {
                                             )
                                         },
                                         bottomBar = {
-                                            // Solo mostrar barra si no estamos viendo un detalle ni una pestaña del drawer
                                             if (detailReport == null && selectedDrawerTab == DrawerTab.NONE) {
                                                 SentinelBottomBar(
                                                     selectedTab = selectedTab,
@@ -205,6 +204,7 @@ class MainActivity : ComponentActivity() {
                                             } else {
                                                 when (selectedTab) {
                                                     SentinelTab.INICIO -> MainScreen(
+                                                        viewModel = mainViewModel,
                                                         incidentRepository = incidentRepository,
                                                         onNavigateToReport = { selectedTab = SentinelTab.REPORTAR }
                                                     )
@@ -464,8 +464,6 @@ fun SentinelTopBar(onMenuClick: () -> Unit, onLogoutClick: () -> Unit) {
         }
     }
 }
-
-// --- Screens Logic ---
 
 @Composable
 fun SafetySettingsScreen() {

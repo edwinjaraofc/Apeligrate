@@ -59,28 +59,17 @@ val recommendedPlaces = listOf(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
+    viewModel: MainViewModel,
     incidentRepository: IncidentReportRepository,
     onNavigateToReport: () -> Unit
 ) {
     val context = LocalContext.current
-    val notificationHelper = remember(context) {
-        val helper = NotificationHelper(context)
-        android.util.Log.d("MainScreen", "NotificationHelper creado")
-        helper
-    }
-    val geofenceManager = remember(context) {
-        val manager = GeofenceManager(context)
-        android.util.Log.d("MainScreen", "GeofenceManager creado")
-        manager
-    }
+    val notificationHelper = remember(context) { NotificationHelper(context) }
+    val geofenceManager = remember(context) { GeofenceManager(context) }
 
-    val viewModel = remember(geofenceManager, notificationHelper) {
-        android.util.Log.d("MainScreen", "Creando MainViewModel...")
-        MainViewModel(
-            notificationHelper = notificationHelper,
-            getLatestAlertsUseCase = null,
-            geofenceManager = geofenceManager
-        )
+    LaunchedEffect(geofenceManager, notificationHelper) {
+        viewModel.setGeofenceManager(geofenceManager)
+        viewModel.setNotificationHelper(notificationHelper)
     }
 
     val uiState by viewModel.uiState.collectAsState()
@@ -89,11 +78,8 @@ fun MainScreen(
     var deviceCoordinates by remember { mutableStateOf<DeviceCoordinates?>(null) }
     var destinationText by remember { mutableStateOf("") }
 
-    android.util.Log.d("MainScreen", "MainScreen composicion completa")
-
     LaunchedEffect(incidentReports) {
         if (incidentReports.isNotEmpty()) {
-            android.util.Log.d("MainScreen", "Reportes recibidos: ${incidentReports.size}")
             viewModel.updateAlertsFromReports(incidentReports)
         }
     }
@@ -116,8 +102,6 @@ fun MainScreen(
     ) { isGranted ->
         if (isGranted) {
             android.util.Log.d("MainScreen", "Permiso de notificaciones CONCEDIDO")
-        } else {
-            android.util.Log.d("MainScreen", "Permiso de notificaciones DENEGADO")
         }
     }
 
@@ -129,7 +113,6 @@ fun MainScreen(
         if (locationProvider.hasLocationPermission()) {
             locationProvider.getCurrentCoordinates { coordinates ->
                 deviceCoordinates = coordinates
-                android.util.Log.d("MainScreen", "Ubicacion inicial: ${coordinates?.latitude}, ${coordinates?.longitude}")
                 coordinates?.let { viewModel.onLocationUpdated(it.latitude, it.longitude) }
             }
 

@@ -1,5 +1,7 @@
 package com.apeligrate.ui.components
 
+import android.view.MotionEvent
+import android.view.View
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,8 +42,6 @@ private data class MapMarker(
     val kind: MarkerKind,
     val category: String = ""
 )
-
-data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
 
 private enum class MarkerKind {
     USER,
@@ -90,7 +90,7 @@ fun SentinelMapPanel(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(260.dp)
+                    .height(280.dp)
                     .clip(RoundedCornerShape(14.dp))
                     .background(DarkBackground),
                 contentAlignment = Alignment.Center
@@ -107,9 +107,23 @@ fun SentinelMapPanel(
                             setBuiltInZoomControls(false)
                             minZoomLevel = 4.0
                             maxZoomLevel = 19.0
+                            
+                            // BLOQUEAR EL SCROLL DEL PADRE AL INTERACTUAR CON EL MAPA
+                            setOnTouchListener { v: View, event: MotionEvent ->
+                                when (event.action) {
+                                    MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                                        v.parent.requestDisallowInterceptTouchEvent(true)
+                                    }
+                                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                                        v.parent.requestDisallowInterceptTouchEvent(false)
+                                    }
+                                }
+                                false // Permitir que el mapa maneje sus propios gestos
+                            }
                         }
                     },
                     update = { view ->
+                        // Center and zoom
                         view.controller.setZoom(zoom)
                         view.controller.setCenter(GeoPoint(center.latitude, center.longitude))
                         
@@ -118,7 +132,10 @@ fun SentinelMapPanel(
                         // Trazar Ruta (Polyline)
                         if (routePoints.isNotEmpty()) {
                             val line = Polyline(view)
-                            val geoPoints = routePoints.map { GeoPoint(it.latitude, it.longitude) }
+                            val geoPoints = ArrayList<GeoPoint>()
+                            routePoints.forEach { 
+                                geoPoints.add(GeoPoint(it.latitude, it.longitude))
+                            }
                             line.setPoints(geoPoints)
                             line.outlinePaint.color = android.graphics.Color.parseColor("#4DB6AC")
                             line.outlinePaint.strokeWidth = 8f
@@ -137,90 +154,30 @@ fun SentinelMapPanel(
                             view.overlays.add(MapEventsOverlay(eventsReceiver))
                         }
                         
-                        // Radios de reportes con lógica de clustering
-                        val reportMarkersOnly = markers.filter { it.kind == MarkerKind.REPORT }
-                        val processedMarkers = mutableSetOf<String>()
-
-                        // Detectar clusters (3+ reportes en 150m)
-                        for (marker in reportMarkersOnly) {
-                            if (processedMarkers.contains("${marker.latitude}_${marker.longitude}")) continue
-
-                            // Encontrar reportes cercanos en 150m
-                            val cluster = reportMarkersOnly.filter { other ->
-                                val results = FloatArray(1)
-                                android.location.Location.distanceBetween(
-                                    marker.latitude, marker.longitude,
-                                    other.latitude, other.longitude,
-                                    results
+                        // Radios de reportes con colores específicos por tipo
+                        markers.filter { it.kind == MarkerKind.REPORT }.forEach { point ->
+                            val colorInt = getCategoryColor(point.category)
+                            val circlePoints = Polygon.pointsAsCircle(GeoPoint(point.latitude, point.longitude), 150.0)
+                            val circle = Polygon(view).apply {
+                                points = circlePoints
+                                fillColor = android.graphics.Color.argb(
+                                    50, 
+                                    android.graphics.Color.red(colorInt), 
+                                    android.graphics.Color.green(colorInt), 
+                                    android.graphics.Color.blue(colorInt)
                                 )
-                                results[0] < 150f
+                                strokeColor = android.graphics.Color.argb(
+                                    100, 
+                                    android.graphics.Color.red(colorInt), 
+                                    android.graphics.Color.green(colorInt), 
+                                    android.graphics.Color.blue(colorInt)
+                                )
+                                strokeWidth = 2f
                             }
-
-                            if (cluster.size >= 3) {
-                                // ES UN CLUSTER - Dibujar UN SOLO círculo que lo englobe
-
-                                // Calcular centro del cluster
-                                val centerLat = cluster.map { it.latitude }.average()
-                                val centerLng = cluster.map { it.longitude }.average()
-
-                                // Calcular radio necesario para envolver todos los puntos
-                                var maxDistance = 0.0
-                                for (point in cluster) {
-                                    val results = FloatArray(1)
-                                    android.location.Location.distanceBetween(
-                                        centerLat, centerLng,
-                                        point.latitude, point.longitude,
-                                        results
-                                    )
-                                    maxDistance = maxOf(maxDistance, results[0].toDouble())
-                                }
-
-                                // Radio adaptativo: máximo + margen
-                                val clusterRadius = maxDistance + 50.0
-
-                                // Color y estilos según cantidad de reportes
-                                val (alphaFill, strokeWidth, clusterColor) = when {
-                                    cluster.size >= 5 -> Triple(120, 6f, android.graphics.Color.parseColor("#CC0000")) // Rojo sangre
-                                    else -> Triple(100, 4f, android.graphics.Color.parseColor("#FF3333")) // Rojo intenso
-                                }
-
-                                val circlePoints = Polygon.pointsAsCircle(GeoPoint(centerLat, centerLng), clusterRadius)
-                                val circle = Polygon(view).apply {
-                                    points = circlePoints
-                                    fillColor = android.graphics.Color.argb(
-                                        alphaFill,
-                                        android.graphics.Color.red(clusterColor),
-                                        android.graphics.Color.green(clusterColor),
-                                        android.graphics.Color.blue(clusterColor)
-                                    )
-                                    strokeColor = if (cluster.size >= 5) {
-                                        android.graphics.Color.argb(200, 0, 0, 0) // Borde negro
-                                    } else {
-                                        android.graphics.Color.argb(120, android.graphics.Color.red(clusterColor), android.graphics.Color.green(clusterColor), android.graphics.Color.blue(clusterColor))
-                                    }
-                                    this.strokeWidth = strokeWidth
-                                }
-                                view.overlays.add(circle)
-
-                                // Marcar como procesados
-                                cluster.forEach { processedMarkers.add("${it.latitude}_${it.longitude}") }
-
-                            } else {
-                                // Reporte individual - Círculo pequeño
-                                val categoryColor = getCategoryColor(marker.category)
-                                val circlePoints = Polygon.pointsAsCircle(GeoPoint(marker.latitude, marker.longitude), 100.0)
-                                val circle = Polygon(view).apply {
-                                    points = circlePoints
-                                    fillColor = android.graphics.Color.argb(50, android.graphics.Color.red(categoryColor), android.graphics.Color.green(categoryColor), android.graphics.Color.blue(categoryColor))
-                                    strokeColor = android.graphics.Color.argb(80, android.graphics.Color.red(categoryColor), android.graphics.Color.green(categoryColor), android.graphics.Color.blue(categoryColor))
-                                    this.strokeWidth = 2f
-                                }
-                                view.overlays.add(circle)
-                                processedMarkers.add("${marker.latitude}_${marker.longitude}")
-                            }
+                            view.overlays.add(circle)
                         }
 
-                        // Marcadores
+                        // Marcadores (Pins)
                         markers.forEach { point ->
                             Marker(view).apply {
                                 position = GeoPoint(point.latitude, point.longitude)

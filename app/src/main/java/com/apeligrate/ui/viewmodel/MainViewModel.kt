@@ -30,7 +30,7 @@ data class MainUiState(
 )
 
 class MainViewModel(
-    private val notificationHelper: NotificationHelper? = null,
+    private var notificationHelper: NotificationHelper? = null,
     private val getLatestAlertsUseCase: GetLatestAlertsUseCase? = null,
     private var geofenceManager: GeofenceManager? = null
 ) : ViewModel() {
@@ -42,43 +42,31 @@ class MainViewModel(
 
     init {
         Log.d("MainViewModel", "🎬 INIT: ViewModel creado")
-        Log.d("MainViewModel", "📍 geofenceManager: $geofenceManager")
-        Log.d("MainViewModel", "📍 notificationHelper: $notificationHelper")
         loadAlerts()
     }
 
     fun setGeofenceManager(manager: GeofenceManager) {
         geofenceManager = manager
-        // Recargar alertas para que se agreguen los geofences
         loadAlerts()
     }
 
+    fun setNotificationHelper(helper: NotificationHelper) {
+        this.notificationHelper = helper
+    }
+
     fun updateAlertsFromReports(incidentReports: List<IncidentReport>) {
-        Log.d("MainViewModel", "🔄 Actualizando alertas desde reportes: ${incidentReports.size} reportes")
-
-        // Convertir reportes a alertas
         val alerts = incidentReports.map { it.toAlert() }
-        Log.d("MainViewModel", "📍 Alertas convertidas: ${alerts.size}")
-
-        // Actualizar estado
         _uiState.update { it.copy(alerts = alerts) }
 
-        // Actualizar geofences
         if (geofenceManager != null) {
-            Log.d("MainViewModel", "🗺️ Actualizando geofences...")
             geofenceManager?.addGeofences(alerts)
-        } else {
-            Log.w("MainViewModel", "⚠️ GeofenceManager es nulo")
         }
     }
 
     private fun loadAlerts() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            Log.d("MainViewModel", "📂 Cargando alertas...")
-            Log.d("MainViewModel", "📂 alerts actuales: ${_uiState.value.alerts.size}")
-
-            // Mocking data for now
+            
             val mockAlerts = listOf(
                 Alert(
                     id = "1",
@@ -93,90 +81,59 @@ class MainViewModel(
                     description = "Asalto con arma de fuego reportado cerca de tu posición.",
                     severity = Severity.CRITICAL,
                     timestamp = System.currentTimeMillis(),
-                    latitude = -12.0673, // Near Lima
+                    latitude = -12.0673,
                     longitude = -77.0336
                 ),
             )
-            Log.d("MainViewModel", "✅ Alertas creadas: ${mockAlerts.size}")
             _uiState.update { it.copy(alerts = mockAlerts, isLoading = false) }
 
-            // Agregar geofences cuando carguen las alertas
             if (geofenceManager != null) {
-                Log.d("MainViewModel", "🗺️ Agregando geofences... (manager: $geofenceManager)")
                 geofenceManager?.addGeofences(mockAlerts)
-            } else {
-                Log.w("MainViewModel", "⚠️ GeofenceManager es NULO en loadAlerts()")
             }
         }
     }
 
     fun onLocationUpdated(latitude: Double, longitude: Double) {
         lastUserLocation = DeviceCoordinates(latitude, longitude)
-        Log.d("MainViewModel", "📍 onLocationUpdated: $latitude, $longitude")
         checkProximity(latitude, longitude)
     }
 
     private fun checkProximity(latitude: Double, longitude: Double) {
         val currentAlerts = _uiState.value.alerts
-        Log.d("MainViewModel", "🔍 checkProximity - alertas: ${currentAlerts.size}, geofenceManager: ${geofenceManager != null}")
-
-        val currentLocation = DeviceCoordinates(latitude, longitude)
-
-        // Obtener zonas agrupadas
         val zones = geofenceManager?.getReportZones(currentAlerts) ?: emptyList()
-        Log.d("MainViewModel", "📊 Zonas detectadas: ${zones.size}")
 
-        // Primero chequear zonas (3+ reportes)
         var alertToShow: Alert? = null
         var zoneMessage = ""
 
         for (zone in zones) {
             val results = FloatArray(1)
-            Location.distanceBetween(
-                latitude, longitude,
-                zone.latitude, zone.longitude,
-                results
-            )
+            Location.distanceBetween(latitude, longitude, zone.latitude, zone.longitude, results)
 
-            if (results[0] <= 500) {
-                Log.d("MainViewModel", "🚨 Usuario EN ZONA: ${zone.id} (${zone.reportCount} reportes, ${results[0].toInt()}m)")
-
-                // Crear alerta consolidada para la zona
+            // Radio de zona ultra-reducido a 15m
+            if (results[0] <= 15) {
                 val firstCritical = zone.reports.firstOrNull { it.severity.name == "CRITICAL" }
                 alertToShow = firstCritical ?: zone.reports.first()
-                zoneMessage = "Zona peligrosa detectada: ${zone.reportCount} incidentes en área cercana"
+                zoneMessage = "Alerta crítica en tu ubicación inmediata."
 
                 if (!notifiedAlertIds.contains(zone.id)) {
-                    Log.d("MainViewModel", "📢 Enviando notificación por ZONA")
-                    notificationHelper?.showProximityAlert(
-                        title = "¡ZONA PELIGROSA!",
-                        message = zoneMessage
-                    )
+                    notificationHelper?.showProximityAlert("¡ZONA PELIGROSA!", zoneMessage)
                     notifiedAlertIds.add(zone.id)
                 }
                 break
             }
         }
 
-        // Si no hay zona, chequear reportes individuales
         if (alertToShow == null) {
-            val currentLocation2 = DeviceCoordinates(latitude, longitude)
-            alertToShow = geofenceManager?.checkIfInsideZone(currentLocation2, currentAlerts)
+            val currentLocation = DeviceCoordinates(latitude, longitude)
+            alertToShow = geofenceManager?.checkIfInsideZone(currentLocation, currentAlerts)
 
             if (alertToShow != null) {
-                Log.d("MainViewModel", "🚨 Usuario DENTRO de incidente individual: ${alertToShow.id}")
                 _uiState.update { it.copy(proximityAlert = alertToShow) }
-
                 if (!notifiedAlertIds.contains(alertToShow.id)) {
-                    Log.d("MainViewModel", "📢 Enviando notificación por INCIDENTE")
-                    notificationHelper?.showProximityAlert(
-                        title = "¡ALERTA DE SEGURIDAD!",
-                        message = alertToShow.description
-                    )
+                    notificationHelper?.showProximityAlert("¡ALERTA DE SEGURIDAD!", alertToShow.description)
                     notifiedAlertIds.add(alertToShow.id)
                 }
             } else {
-                Log.d("MainViewModel", "✅ Usuario en zona segura")
                 _uiState.update { it.copy(proximityAlert = null) }
             }
         } else {
@@ -192,14 +149,11 @@ class MainViewModel(
 
     private fun calculateRoute(dest: DeviceCoordinates) {
         val start = lastUserLocation ?: return
-        
-        // Trazamos una ruta simulada (línea con un punto intermedio de desvío)
         val points = listOf(
             DeviceCoordinates(start.latitude, start.longitude),
-            DeviceCoordinates((start.latitude + dest.latitude) / 2 + 0.002, (start.longitude + dest.longitude) / 2 + 0.002),
+            DeviceCoordinates((start.latitude + dest.latitude) / 2 + 0.0005, (start.longitude + dest.longitude) / 2 + 0.0005),
             DeviceCoordinates(dest.latitude, dest.longitude)
         )
-        
         _uiState.update { it.copy(routePoints = points) }
         checkDangerOnRoute(points)
     }
@@ -213,7 +167,8 @@ class MainViewModel(
                 if (alert.latitude != null && alert.longitude != null) {
                     val results = FloatArray(1)
                     Location.distanceBetween(point.latitude, point.longitude, alert.latitude, alert.longitude, results)
-                    if (results[0] < 400 && alert.severity == Severity.CRITICAL) {
+                    // Radio reducido a 8 metros para máxima precisión
+                    if (results[0] < 8 && alert.severity == Severity.CRITICAL) {
                         dangerFound = true
                         break
                     }
@@ -224,7 +179,7 @@ class MainViewModel(
         
         _uiState.update { it.copy(dangerOnRoute = dangerFound) }
         if (dangerFound) {
-            notificationHelper?.showProximityAlert("Ruta Peligrosa", "Se detectaron zonas de riesgo en tu camino.")
+            notificationHelper?.showProximityAlert("Ruta Peligrosa", "Incidente detectado en tu camino exacto.")
         }
     }
 

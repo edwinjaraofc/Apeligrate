@@ -15,74 +15,54 @@ import com.apeligrate.domain.model.Alert
 class GeofenceManager(private val context: Context) {
     companion object {
         const val TAG = "GeofenceManager"
+        // Radio de detección MÍNIMO para evitar falsos positivos (20 metros)
+        const val DANGER_RADIUS_METERS = 20f
     }
 
     private val geofencingClient: GeofencingClient = LocationServices.getGeofencingClient(context)
 
     fun addGeofences(alerts: List<Alert>) {
-        Log.d(TAG, "📍 Intentando agregar geofences para ${alerts.size} alertas")
+        Log.d(TAG, "📍 Agregando geofences de alta precisión para ${alerts.size} alertas")
 
         val geofences = alerts.mapNotNull { alert ->
             if (alert.latitude != null && alert.longitude != null && alert.severity.name == "CRITICAL") {
-                Log.d(TAG, "✅ Agregando geofence para: ${alert.id} en (${alert.latitude}, ${alert.longitude})")
                 Geofence.Builder()
                     .setRequestId(alert.id)
                     .setCircularRegion(
                         alert.latitude,
                         alert.longitude,
-                        500f // radio en metros
+                        DANGER_RADIUS_METERS
                     )
                     .setExpirationDuration(Geofence.NEVER_EXPIRE)
                     .setTransitionTypes(
                         Geofence.GEOFENCE_TRANSITION_ENTER or
-                        Geofence.GEOFENCE_TRANSITION_EXIT or
                         Geofence.GEOFENCE_TRANSITION_DWELL
                     )
-                    .setLoiteringDelay(5000) // 5 segundos dentro = notificación
+                    .setLoiteringDelay(2000) // 2 segundos dentro
                     .build()
-            } else {
-                Log.d(TAG, "⏭️ Saltando alerta (no CRÍTICA o sin coordenadas): ${alert.id}")
-                null
-            }
+            } else null
         }
 
-        if (geofences.isEmpty()) {
-            Log.w(TAG, "⚠️ No se agregaron geofences (lista vacía)")
-            return
-        }
-
-        // Remover geofences antiguos primero
-        try {
-            geofencingClient.removeGeofences(geofences.map { it.requestId })
-            Log.d(TAG, "🗑️ Geofences antiguos removidos para actualizar")
-        } catch (e: Exception) {
-            Log.d(TAG, "ℹ️ No había geofences antiguos")
-        }
+        if (geofences.isEmpty()) return
 
         val geofencingRequest = GeofencingRequest.Builder()
-            .setInitialTrigger(GeofencingRequest.INITIAL_TRIGGER_ENTER or GeofencingRequest.INITIAL_TRIGGER_DWELL)
+            .setInitialTrigger(GeofencingRequest.INITIAL_TRIGGER_ENTER)
             .addGeofences(geofences)
             .build()
 
         val intent = Intent(context, GeofenceReceiver::class.java)
         val pendingIntent = PendingIntent.getBroadcast(
-            context,
-            0,
-            intent,
+            context, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         try {
             geofencingClient.addGeofences(geofencingRequest, pendingIntent)
-            Log.d(TAG, "✅ ${geofences.size} geofences agregados exitosamente")
-        } catch (e: SecurityException) {
-            Log.e(TAG, "❌ Error de permisos al agregar geofences: ${e.message}", e)
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Error al agregar geofences: ${e.message}", e)
+            Log.e(TAG, "Error al agregar geofences", e)
         }
     }
 
-    // Checar manualmente si el usuario está dentro de alguna zona peligrosa
     fun checkIfInsideZone(userLocation: DeviceCoordinates, alerts: List<Alert>): Alert? {
         for (alert in alerts) {
             if (alert.latitude != null && alert.longitude != null && alert.severity.name == "CRITICAL") {
@@ -92,72 +72,32 @@ class GeofenceManager(private val context: Context) {
                     alert.latitude, alert.longitude,
                     results
                 )
-
-                if (results[0] <= 500) {
-                    Log.d(TAG, "🚨 Usuario está dentro de zona: ${alert.id} (${results[0].toInt()}m)")
-                    return alert
-                }
+                if (results[0] <= DANGER_RADIUS_METERS) return alert
             }
         }
         return null
     }
-    // Agrupar reportes cercanos en "zonas" para alertas consolidadas
+
     fun getReportZones(alerts: List<Alert>): List<ReportZone> {
         val zones = mutableListOf<ReportZone>()
         val processed = mutableSetOf<String>()
-        
         for (alert in alerts) {
-            if (alert.latitude == null || alert.longitude == null) continue
-            if (processed.contains(alert.id)) continue
-            
-            // Encontrar todos los reportes dentro de 150m
+            if (alert.latitude == null || alert.longitude == null || processed.contains(alert.id)) continue
             val nearbyAlerts = alerts.filter { other ->
                 if (other.latitude == null || other.longitude == null) return@filter false
                 val results = FloatArray(1)
-                Location.distanceBetween(
-                    alert.latitude, alert.longitude,
-                    other.latitude, other.longitude,
-                    results
-                )
-                results[0] <= 150f
+                Location.distanceBetween(alert.latitude, alert.longitude, other.latitude, other.longitude, results)
+                results[0] <= DANGER_RADIUS_METERS * 2
             }
-            
-            // Si hay 3+ reportes, crear una zona
             if (nearbyAlerts.size >= 3) {
-                Log.d(TAG, "🗺️ Zona detectada con ${nearbyAlerts.size} reportes")
-                
-                // Centro de la zona = promedio de coordenadas
                 val centerLat = nearbyAlerts.mapNotNull { it.latitude }.average()
                 val centerLng = nearbyAlerts.mapNotNull { it.longitude }.average()
-                val zoneId = "${(centerLat * 1000).toInt()}_${(centerLng * 1000).toInt()}"
-                
-                zones.add(
-                    ReportZone(
-                        id = zoneId,
-                        latitude = centerLat,
-                        longitude = centerLng,
-                        reportCount = nearbyAlerts.size,
-                        reports = nearbyAlerts,
-                        severity = if (nearbyAlerts.any { it.severity.name == "CRITICAL" }) "CRITICAL" else "WARNING"
-                    )
-                )
-                
+                zones.add(ReportZone("${centerLat}_${centerLng}", centerLat, centerLng, nearbyAlerts.size, nearbyAlerts, "CRITICAL"))
                 nearbyAlerts.forEach { processed.add(it.id) }
             }
         }
-        
         return zones
     }
 }
 
-data class ReportZone(
-    val id: String,
-    val latitude: Double,
-    val longitude: Double,
-    val reportCount: Int,
-    val reports: List<Alert>,
-    val severity: String
-)
-
-
-
+data class ReportZone(val id: String, val latitude: Double, val longitude: Double, val reportCount: Int, val reports: List<Alert>, val severity: String)
