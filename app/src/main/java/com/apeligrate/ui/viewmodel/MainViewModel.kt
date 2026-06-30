@@ -7,11 +7,13 @@ import android.util.Log
 import com.apeligrate.data.local.DeviceCoordinates
 import com.apeligrate.data.remote.RouteService
 import com.apeligrate.domain.model.Alert
+import com.apeligrate.domain.model.DangerZone
 import com.apeligrate.domain.model.Severity
 import com.apeligrate.domain.model.IncidentReport
 import com.apeligrate.domain.model.toAlert
 import com.apeligrate.domain.use_case.GetLatestAlertsUseCase
 import com.apeligrate.util.NotificationHelper
+import com.apeligrate.util.DangerZoneAggregator
 import com.apeligrate.util.GeofenceManager
 import com.apeligrate.util.PolylineUtil
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,7 +31,8 @@ data class MainUiState(
     val userLocation: DeviceCoordinates? = null,
     val destination: DeviceCoordinates? = null,
     val currentRoutePoints: List<DeviceCoordinates> = emptyList(),
-    val dangerOnRoute: Boolean = false
+    val dangerOnRoute: Boolean = false,
+    val dangerZones: List<DangerZone> = emptyList()
 )
 
 class MainViewModel(
@@ -41,7 +44,7 @@ class MainViewModel(
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
 
-    private val notifiedAlertIds = mutableSetOf<String>()
+    private val notifiedZoneIds = mutableSetOf<String>()
 
     init {
         Log.d("MainViewModel", "🎬 INIT: ViewModel creado")
@@ -71,40 +74,18 @@ class MainViewModel(
 
     fun updateAlertsFromReports(incidentReports: List<IncidentReport>) {
         val alerts = incidentReports.map { it.toAlert() }
-        _uiState.update { it.copy(alerts = alerts) }
+        val zones = geofenceManager?.buildDangerZones(alerts) ?: emptyList()
+        _uiState.update { it.copy(alerts = alerts, dangerZones = zones) }
 
         if (geofenceManager != null) {
-            geofenceManager?.addGeofences(alerts)
+            geofenceManager?.addGeofences(zones)
         }
     }
 
     private fun loadAlerts() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            
-            val mockAlerts = listOf(
-                Alert(
-                    id = "1",
-                    title = "SISTEMA ACTIVO",
-                    description = "Vigilancia comunitaria en curso.",
-                    severity = Severity.SAFE,
-                    timestamp = System.currentTimeMillis(),
-                ),
-                Alert(
-                    id = "2",
-                    title = "ROBO REPORTADO",
-                    description = "Asalto con arma de fuego reportado cerca de tu posición.",
-                    severity = Severity.CRITICAL,
-                    timestamp = System.currentTimeMillis(),
-                    latitude = -12.0673,
-                    longitude = -77.0336
-                ),
-            )
-            _uiState.update { it.copy(alerts = mockAlerts, isLoading = false) }
-
-            if (geofenceManager != null) {
-                geofenceManager?.addGeofences(mockAlerts)
-            }
+            _uiState.update { it.copy(alerts = emptyList(), dangerZones = emptyList(), isLoading = false) }
         }
     }
 
@@ -115,44 +96,37 @@ class MainViewModel(
     }
 
     private fun checkProximity(latitude: Double, longitude: Double) {
-        val currentAlerts = _uiState.value.alerts
-        val zones = geofenceManager?.getReportZones(currentAlerts) ?: emptyList()
-
-        var alertToShow: Alert? = null
-        var zoneMessage = ""
-
-        for (zone in zones) {
-            val results = FloatArray(1)
-            Location.distanceBetween(latitude, longitude, zone.latitude, zone.longitude, results)
-
-            if (results[0] <= 15) {
-                val firstCritical = zone.reports.firstOrNull { it.severity.name == "CRITICAL" }
-                alertToShow = firstCritical ?: zone.reports.first()
-                zoneMessage = "Alerta crítica en tu ubicación inmediata."
-
-                if (!notifiedAlertIds.contains(zone.id)) {
-                    notificationHelper?.showProximityAlert("¡ZONA PELIGROSA!", zoneMessage)
-                    notifiedAlertIds.add(zone.id)
-                }
-                break
-            }
+        val currentState = _uiState.value
+        val zones = currentState.dangerZones.ifEmpty {
+            geofenceManager?.buildDangerZones(currentState.alerts) ?: emptyList()
         }
+        val activeZone = geofenceManager?.findContainingZone(latitude, longitude, zones)
+            ?: DangerZoneAggregator.findContainingZone(latitude, longitude, zones)
 
-        if (alertToShow == null) {
-            val currentLocation = DeviceCoordinates(latitude, longitude)
-            alertToShow = geofenceManager?.checkIfInsideZone(currentLocation, currentAlerts)
-
-            if (alertToShow != null) {
-                _uiState.update { it.copy(proximityAlert = alertToShow) }
-                if (!notifiedAlertIds.contains(alertToShow.id)) {
-                    notificationHelper?.showProximityAlert("¡ALERTA DE SEGURIDAD!", alertToShow.description)
-                    notifiedAlertIds.add(alertToShow.id)
-                }
+        if (activeZone != null) {
+            val zoneMessage = if (activeZone.grouped) {
+                "Se activó una zona agrupada con ${activeZone.reportCount} incidentes cercanos."
             } else {
-                _uiState.update { it.copy(proximityAlert = null) }
+                "Ya estás dentro del radio de una zona de peligro."
+            }
+            val alertToShow = activeZone.primaryReport.copy(
+                title = if (activeZone.grouped) "ZONA AGRUPADA ACTIVA" else activeZone.primaryReport.title,
+                description = zoneMessage
+            )
+
+            _uiState.update { it.copy(proximityAlert = alertToShow, dangerZones = zones) }
+
+            if (notifiedZoneIds.add(activeZone.id)) {
+                notificationHelper?.showProximityAlert(
+                    if (activeZone.grouped) "¡ZONA AGRUPADA!" else "¡ALERTA DE SEGURIDAD!",
+                    zoneMessage
+                )
             }
         } else {
-            _uiState.update { it.copy(proximityAlert = alertToShow) }
+            if (notifiedZoneIds.isNotEmpty()) {
+                notifiedZoneIds.clear()
+            }
+            _uiState.update { it.copy(proximityAlert = null, dangerZones = zones) }
         }
     }
 
@@ -220,18 +194,24 @@ class MainViewModel(
     }
 
     private fun checkDangerOnRoute(route: List<DeviceCoordinates>) {
-        val alerts = _uiState.value.alerts
+        val zones = _uiState.value.dangerZones.ifEmpty {
+            geofenceManager?.buildDangerZones(_uiState.value.alerts) ?: emptyList()
+        }
         var dangerFound = false
-        
+
         for (point in route) {
-            for (alert in alerts) {
-                if (alert.latitude != null && alert.longitude != null) {
-                    val results = FloatArray(1)
-                    Location.distanceBetween(point.latitude, point.longitude, alert.latitude, alert.longitude, results)
-                    if (results[0] < 8 && alert.severity == Severity.CRITICAL) {
+            for (zone in zones) {
+                val results = FloatArray(1)
+                Location.distanceBetween(
+                    point.latitude,
+                    point.longitude,
+                    zone.centerLatitude,
+                    zone.centerLongitude,
+                    results
+                )
+                if (results[0] <= zone.radiusMeters) {
                         dangerFound = true
                         break
-                    }
                 }
             }
             if (dangerFound) break

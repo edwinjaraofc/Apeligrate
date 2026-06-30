@@ -404,11 +404,17 @@ fun FeedItem(
 }
 
 fun getTimeAgo(time: Long): String {
-    val diff = System.currentTimeMillis() - time
+    val normalizedTime = if (time in 1..9999999999L) time * 1000L else time
+    val diff = System.currentTimeMillis() - normalizedTime
+    val minutes = diff / 60000
+    val hours = diff / 3600000
+    val days = diff / 86400000
     return when {
         diff < 60000 -> "ahora"
-        diff < 3600000 -> "hace ${diff / 60000}min"
-        diff < 86400000 -> "hace ${diff / 3600000}h"
-        else -> "hace ${diff / 86400000}d"
+        diff < 3600000 -> "hace ${minutes}min"
+        diff < 86400000 -> "hace ${hours}h"
+        days < 30 -> "hace ${days}d"
+        days < 60 -> "hace 1 mes"
+        else -> "hace ${days / 30} meses"
     }
 }

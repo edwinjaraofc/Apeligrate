@@ -1,7 +1,6 @@
 package com.apeligrate.data.worker
 
 import android.content.Context
-import android.location.Location
 import android.location.LocationManager
 import androidx.room.Room
 import androidx.work.CoroutineWorker
@@ -10,10 +9,14 @@ import androidx.work.ListenableWorker.Result
 import com.apeligrate.data.local.SentinelDatabase
 import com.apeligrate.data.local.entity.NotificationCooldownEntity
 import com.apeligrate.data.repository.IncidentReportRepositoryImpl
+import com.apeligrate.domain.model.Alert
+import com.apeligrate.domain.model.IncidentReport
+import com.apeligrate.domain.model.Severity
 import com.apeligrate.domain.model.isCritical
 import com.apeligrate.util.NotificationHelper
+import com.apeligrate.util.DangerZoneAggregator
+import com.apeligrate.util.GeofenceManager
 import kotlinx.coroutines.flow.first
-import kotlin.math.roundToInt
 
 class AlertWorker(
     context: Context,
@@ -42,45 +45,46 @@ class AlertWorker(
 
         // 2. Obtener reportes
         val reports = repository.getReports().first()
-        
-        // 3. Filtrar por cercanía (200 metros)
-        val nearbyReports = reports.filter { report ->
-            val lat = report.latitude ?: return@filter false
-            val lng = report.longitude ?: return@filter false
-            val results = FloatArray(1)
-            Location.distanceBetween(lastLocation.latitude, lastLocation.longitude, lat, lng, results)
-            results[0] < 200f
-        }
+        val zones = DangerZoneAggregator.buildDangerZones(reports.map { it.toAlert() })
+        if (zones.isEmpty()) return Result.success()
 
-        if (nearbyReports.isEmpty()) return Result.success()
+        val activeZone = GeofenceManager(applicationContext).findContainingZone(
+            latitude = lastLocation.latitude,
+            longitude = lastLocation.longitude,
+            zones = zones,
+            bufferMeters = 25f
+        ) ?: return Result.success()
 
-        // 4. Lógica de Agrupación y Cooldown
-        // Usamos una "ZoneKey" basada en coordenadas redondeadas para agrupar incidentes cercanos
-        val mostCritical = nearbyReports.maxByOrNull { if (it.category.isCritical()) 2 else 1 } ?: return Result.success()
-        val zoneKey = "${(mostCritical.latitude!! * 1000).roundToInt()}_${(mostCritical.longitude!! * 1000).roundToInt()}"
-        
         val cooldownDao = database.notificationCooldownDao()
-        val lastNotified = cooldownDao.getLastNotifiedAt(zoneKey)
+        val lastNotified = cooldownDao.getLastNotifiedAt(activeZone.id)
         val threeHoursMillis = 3 * 60 * 60 * 1000
 
         if (lastNotified == null || (System.currentTimeMillis() - lastNotified) > threeHoursMillis) {
-            // Enviar Notificación
-            val title = if (mostCritical.category.isCritical()) "¡ALERTA CRÍTICA!" else "Incidente cercano"
-            val message = if (nearbyReports.size > 1) {
-                "${mostCritical.category} y ${nearbyReports.size - 1} incidentes más en tu zona."
+            val title = if (activeZone.grouped) "¡ZONA AGRUPADA!" else "¡ALERTA CRÍTICA!"
+            val message = if (activeZone.grouped) {
+                "Hay ${activeZone.reportCount} incidentes cercanos dentro de una misma zona."
             } else {
-                "Se reportó ${mostCritical.category} cerca de tu ubicación."
+                "Se reportó ${activeZone.primaryReport.title} cerca de tu ubicación."
             }
 
             notificationHelper.showProximityAlert(title, message)
 
-            // Actualizar Cooldown
-            cooldownDao.updateLastNotifiedAt(NotificationCooldownEntity(zoneKey, System.currentTimeMillis()))
-            
-            // Limpiar tabla de registros muy viejos (más de 24h)
+            cooldownDao.updateLastNotifiedAt(NotificationCooldownEntity(activeZone.id, System.currentTimeMillis()))
             cooldownDao.clearOldCooldowns(System.currentTimeMillis() - (24 * 60 * 60 * 1000))
         }
 
         return Result.success()
     }
+}
+
+private fun IncidentReport.toAlert(): Alert {
+    return Alert(
+        id = id,
+        title = category,
+        description = description,
+        severity = if (category.isCritical()) Severity.CRITICAL else Severity.WARNING,
+        timestamp = reportedAt,
+        latitude = latitude,
+        longitude = longitude
+    )
 }

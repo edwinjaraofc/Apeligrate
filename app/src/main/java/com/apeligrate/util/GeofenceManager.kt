@@ -3,42 +3,44 @@ package com.apeligrate.util
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.location.Location
 import android.util.Log
 import com.google.android.gms.location.Geofence
 import com.google.android.gms.location.GeofencingClient
 import com.google.android.gms.location.GeofencingRequest
 import com.google.android.gms.location.LocationServices
-import com.apeligrate.data.local.DeviceCoordinates
 import com.apeligrate.domain.model.Alert
+import com.apeligrate.domain.model.DangerZone
 
 class GeofenceManager(private val context: Context) {
     companion object {
         const val TAG = "GeofenceManager"
-        // Radio de detección MÍNIMO para evitar falsos positivos (20 metros)
-        const val DANGER_RADIUS_METERS = 20f
+        const val DANGER_RADIUS_METERS = DangerZoneAggregator.DEFAULT_ZONE_RADIUS_METERS
     }
 
     private val geofencingClient: GeofencingClient = LocationServices.getGeofencingClient(context)
 
-    fun addGeofences(alerts: List<Alert>) {
-        Log.d(TAG, "📍 Agregando geofences de alta precisión para ${alerts.size} alertas")
+    fun buildDangerZones(alerts: List<Alert>): List<DangerZone> {
+        return DangerZoneAggregator.buildDangerZones(alerts)
+    }
 
-        val geofences = alerts.mapNotNull { alert ->
-            if (alert.latitude != null && alert.longitude != null && alert.severity.name == "CRITICAL") {
+    fun addGeofences(zones: List<DangerZone>) {
+        Log.d(TAG, "📍 Agregando geofences para ${zones.size} zonas")
+
+        val geofences = zones.mapNotNull { zone ->
+            if (zone.radiusMeters > 0f) {
                 Geofence.Builder()
-                    .setRequestId(alert.id)
+                    .setRequestId(zone.id)
                     .setCircularRegion(
-                        alert.latitude,
-                        alert.longitude,
-                        DANGER_RADIUS_METERS
+                        zone.centerLatitude,
+                        zone.centerLongitude,
+                        zone.radiusMeters
                     )
                     .setExpirationDuration(Geofence.NEVER_EXPIRE)
                     .setTransitionTypes(
                         Geofence.GEOFENCE_TRANSITION_ENTER or
                         Geofence.GEOFENCE_TRANSITION_DWELL
                     )
-                    .setLoiteringDelay(2000) // 2 segundos dentro
+                    .setLoiteringDelay(2000)
                     .build()
             } else null
         }
@@ -63,41 +65,12 @@ class GeofenceManager(private val context: Context) {
         }
     }
 
-    fun checkIfInsideZone(userLocation: DeviceCoordinates, alerts: List<Alert>): Alert? {
-        for (alert in alerts) {
-            if (alert.latitude != null && alert.longitude != null && alert.severity.name == "CRITICAL") {
-                val results = FloatArray(1)
-                Location.distanceBetween(
-                    userLocation.latitude, userLocation.longitude,
-                    alert.latitude, alert.longitude,
-                    results
-                )
-                if (results[0] <= DANGER_RADIUS_METERS) return alert
-            }
-        }
-        return null
-    }
-
-    fun getReportZones(alerts: List<Alert>): List<ReportZone> {
-        val zones = mutableListOf<ReportZone>()
-        val processed = mutableSetOf<String>()
-        for (alert in alerts) {
-            if (alert.latitude == null || alert.longitude == null || processed.contains(alert.id)) continue
-            val nearbyAlerts = alerts.filter { other ->
-                if (other.latitude == null || other.longitude == null) return@filter false
-                val results = FloatArray(1)
-                Location.distanceBetween(alert.latitude, alert.longitude, other.latitude, other.longitude, results)
-                results[0] <= DANGER_RADIUS_METERS * 2
-            }
-            if (nearbyAlerts.size >= 3) {
-                val centerLat = nearbyAlerts.mapNotNull { it.latitude }.average()
-                val centerLng = nearbyAlerts.mapNotNull { it.longitude }.average()
-                zones.add(ReportZone("${centerLat}_${centerLng}", centerLat, centerLng, nearbyAlerts.size, nearbyAlerts, "CRITICAL"))
-                nearbyAlerts.forEach { processed.add(it.id) }
-            }
-        }
-        return zones
+    fun findContainingZone(
+        latitude: Double,
+        longitude: Double,
+        zones: List<DangerZone>,
+        bufferMeters: Float = 0f
+    ): DangerZone? {
+        return DangerZoneAggregator.findContainingZone(latitude, longitude, zones, bufferMeters)
     }
 }
-
-data class ReportZone(val id: String, val latitude: Double, val longitude: Double, val reportCount: Int, val reports: List<Alert>, val severity: String)

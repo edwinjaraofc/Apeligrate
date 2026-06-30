@@ -9,13 +9,10 @@ import com.apeligrate.data.local.entity.NotificationCooldownEntity
 @Dao
 interface NotificationCooldownDao {
 
-    @Query("SELECT * FROM notification_cooldown WHERE geofenceId = :geofenceId")
+    @Query("SELECT * FROM notification_cooldowns WHERE id = :geofenceId")
     suspend fun getCooldown(geofenceId: String): NotificationCooldownEntity?
 
-    @Query("SELECT lastNotificationTime FROM notification_cooldown WHERE geofenceId = :geofenceId")
-    suspend fun getLastNotificationTime(geofenceId: String): Long?
-
-    @Query("SELECT lastNotificationTime FROM notification_cooldown WHERE geofenceId = :zoneKey")
+    @Query("SELECT lastNotifiedAt FROM notification_cooldowns WHERE id = :zoneKey")
     suspend fun getLastNotifiedAt(zoneKey: String): Long?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -24,12 +21,12 @@ interface NotificationCooldownDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun updateLastNotifiedAt(cooldown: NotificationCooldownEntity)
 
-    @Query("DELETE FROM notification_cooldown WHERE lastNotificationTime < :oldTimestamp")
+    @Query("DELETE FROM notification_cooldowns WHERE lastNotifiedAt < :oldTimestamp")
     suspend fun deleteOldCooldowns(oldTimestamp: Long)
 
-    @Query("DELETE FROM notification_cooldown WHERE lastNotificationTime < :oldTimestamp")
+    @Query("DELETE FROM notification_cooldowns WHERE lastNotifiedAt < :oldTimestamp")
     suspend fun clearOldCooldowns(oldTimestamp: Long)
 
-    @Query("DELETE FROM notification_cooldown")
+    @Query("DELETE FROM notification_cooldowns")
     suspend fun clearAll()
 }

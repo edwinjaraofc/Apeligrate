@@ -42,12 +42,13 @@ class GeofenceReceiver : BroadcastReceiver() {
                 Log.d(TAG, "🚨 ENTRASTE a zona peligrosa: ${triggeringGeofences?.map { it.requestId }}")
                 triggeringGeofences?.forEach { geofence ->
                     val zoneId = geofence.requestId
-                    notifiedZones.add(zoneId)
-                    val notificationHelper = NotificationHelper(context)
-                    notificationHelper.showProximityAlert(
-                        "¡ALERTA CRÍTICA!",
-                        "Acabas de entrar a una zona de peligro"
-                    )
+                    if (notifiedZones.add(zoneId)) {
+                        val notificationHelper = NotificationHelper(context)
+                        notificationHelper.showProximityAlert(
+                            "¡ALERTA CRÍTICA!",
+                            "Acabas de entrar a una zona de peligro"
+                        )
+                    }
                 }
             }
             Geofence.GEOFENCE_TRANSITION_DWELL -> {
@@ -59,11 +60,6 @@ class GeofenceReceiver : BroadcastReceiver() {
                 triggeringGeofences?.forEach { geofence ->
                     val zoneId = geofence.requestId
                     notifiedZones.remove(zoneId)
-                    val notificationHelper = NotificationHelper(context)
-                    notificationHelper.showProximityAlert(
-                        "Zona Segura",
-                        "Saliste de la zona de peligro"
-                    )
                 }
             }
             else -> {
@@ -72,5 +68,4 @@ class GeofenceReceiver : BroadcastReceiver() {
         }
     }
 }
-
 

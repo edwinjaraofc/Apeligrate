@@ -1,6 +1,7 @@
 package com.apeligrate.ui.screens
 
 import android.Manifest
+import android.location.Location
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -77,6 +78,10 @@ fun MainScreen(
     val locationProvider = remember(context) { DeviceLocationProvider(context) }
     var deviceCoordinates by remember { mutableStateOf<DeviceCoordinates?>(null) }
     var destinationText by remember { mutableStateOf("") }
+    var locationUpdatesEnabled by remember { mutableStateOf(locationProvider.hasLocationPermission()) }
+    val sortedAlerts = remember(uiState.alerts, uiState.userLocation) {
+        sortAlertsByDistance(uiState.alerts, uiState.userLocation)
+    }
 
     LaunchedEffect(incidentReports) {
         if (incidentReports.isNotEmpty()) {
@@ -91,8 +96,10 @@ fun MainScreen(
             permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
 
         if (granted) {
+            locationUpdatesEnabled = true
             locationProvider.getCurrentCoordinates { coordinates ->
                 deviceCoordinates = coordinates
+                coordinates?.let { viewModel.onLocationUpdated(it.latitude, it.longitude) }
             }
         }
     }
@@ -111,6 +118,20 @@ fun MainScreen(
         }
 
         if (locationProvider.hasLocationPermission()) {
+            locationUpdatesEnabled = true
+        } else {
+            permissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                    Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                )
+            )
+        }
+    }
+
+    LaunchedEffect(locationUpdatesEnabled) {
+        if (locationUpdatesEnabled) {
             locationProvider.getCurrentCoordinates { coordinates ->
                 deviceCoordinates = coordinates
                 coordinates?.let { viewModel.onLocationUpdated(it.latitude, it.longitude) }
@@ -125,14 +146,6 @@ fun MainScreen(
                     }
                 }
             }
-        } else {
-            permissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION,
-                    Manifest.permission.ACCESS_BACKGROUND_LOCATION
-                )
-            )
         }
     }
 
@@ -279,6 +292,7 @@ fun MainScreen(
                 SentinelMapPanel(
                     centerCoordinates = uiState.focusedLocation ?: deviceCoordinates,
                     reportMarkers = incidentReports,
+                    dangerZones = uiState.dangerZones,
                     routePoints = uiState.currentRoutePoints,
                     destination = uiState.destination,
                     title = if (uiState.destination != null) "Navegacion Activa" else "Mapa de vigilancia",
@@ -308,8 +322,8 @@ fun MainScreen(
                 )
             }
 
-            items(uiState.alerts, key = { alert -> alert.id }) { alert ->
-                AlertItem(alert)
+            items(sortedAlerts, key = { alert -> alert.id }) { alert ->
+                AlertItem(alert, uiState.userLocation)
             }
 
             item {
@@ -385,7 +399,14 @@ fun ProximityAlertCard(alert: Alert, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun AlertItem(alert: Alert) {
+private fun AlertItem(alert: Alert, userLocation: DeviceCoordinates?) {
+    val distanceText = remember(alert, userLocation) {
+        formatDistance(alert.latitude, alert.longitude, userLocation)
+    }
+    val timeText = remember(alert.timestamp) {
+        formatTimeAgo(alert.timestamp)
+    }
+
     SentinelCard(modifier = Modifier.fillMaxWidth()) {
         Column {
             Row(
@@ -405,19 +426,97 @@ private fun AlertItem(alert: Alert) {
                     modifier = Modifier.weight(1f)
                 )
                 Text(
-                    text = "ID: ${alert.id}",
+                    text = timeText,
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.Gray,
                 )
             }
             Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = alert.description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color.White.copy(alpha = 0.7f),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = alert.description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.7f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = distanceText,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.65f)
+                )
+            }
         }
+    }
+}
+
+private fun formatDistance(
+    alertLatitude: Double?,
+    alertLongitude: Double?,
+    userLocation: DeviceCoordinates?
+): String {
+    if (alertLatitude == null || alertLongitude == null || userLocation == null) {
+        return "Distancia: no disponible"
+    }
+
+    val results = FloatArray(1)
+    Location.distanceBetween(
+        userLocation.latitude,
+        userLocation.longitude,
+        alertLatitude,
+        alertLongitude,
+        results
+    )
+
+    val meters = results[0].toInt()
+    return if (meters < 1000) {
+        "A $meters m de ti"
+    } else {
+        "A ${"%.1f".format(meters / 1000f)} km de ti"
+    }
+}
+
+private fun sortAlertsByDistance(
+    alerts: List<Alert>,
+    userLocation: DeviceCoordinates?
+): List<Alert> {
+    if (userLocation == null) return alerts
+
+    return alerts.mapIndexed { index, alert ->
+        val distance = distanceToAlert(alert, userLocation)
+        Triple(alert, distance, index)
+    }.sortedWith(
+        compareBy<Triple<Alert, Float, Int>> { it.second }
+            .thenBy { it.third }
+    ).map { it.first }
+}
+
+private fun distanceToAlert(alert: Alert, userLocation: DeviceCoordinates): Float {
+    if (alert.latitude == null || alert.longitude == null) return Float.MAX_VALUE
+
+    val results = FloatArray(1)
+    Location.distanceBetween(
+        userLocation.latitude,
+        userLocation.longitude,
+        alert.latitude,
+        alert.longitude,
+        results
+    )
+    return results[0]
+}
+
+private fun formatTimeAgo(time: Long): String {
+    val normalizedTime = if (time in 1..9999999999L) time * 1000L else time
+    val diff = System.currentTimeMillis() - normalizedTime
+    val minutes = diff / 60000
+    val hours = diff / 3600000
+    val days = diff / 86400000
+    return when {
+        diff < 60000 -> "hace un momento"
+        diff < 3600000 -> "hace $minutes min"
+        diff < 86400000 -> "hace $hours h"
+        days < 30 -> "hace $days d"
+        days < 60 -> "hace 1 mes"
+        else -> "hace ${days / 30} meses"
     }
 }

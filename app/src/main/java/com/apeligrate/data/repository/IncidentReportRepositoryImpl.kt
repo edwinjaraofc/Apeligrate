@@ -22,6 +22,11 @@ import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.text.SimpleDateFormat
+import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZonedDateTime
+import java.util.Locale
 
 private const val TAG = "IncidentReportRepo"
 private const val FALSE_REPORT_THRESHOLD = 10
@@ -225,7 +230,9 @@ private fun Map<String, Any?>.toIncidentReport(): IncidentReport {
         longitude = this["longitude"]?.toString()?.toDoubleOrNull(),
         address = this["address"]?.toString(),
         isAnonymous = this["is_anonymous"] as? Boolean ?: false,
-        reportedAt = this["reported_at"]?.toString()?.toLongOrNull() ?: System.currentTimeMillis(),
+        reportedAt = parseReportedAt(
+            this["reported_at"] ?: this["created_at"] ?: this["inserted_at"] ?: this["updated_at"]
+        ),
         userId = this["user_id"]?.toString(),
         status = this["status"]?.toString() ?: "warning",
         images = (this["images"] as? List<*>)?.map { it.toString() } ?: emptyList(),
@@ -233,6 +240,47 @@ private fun Map<String, Any?>.toIncidentReport(): IncidentReport {
         falseCount = this["false_count"]?.toString()?.toIntOrNull() ?: 0,
         persistenceMessage = this["persistence_message"]?.toString().orEmpty()
     )
+}
+
+private fun normalizeEpochMillis(value: Long): Long {
+    return if (value in 1..9999999999L) value * 1000L else value
+}
+
+private fun parseReportedAt(raw: Any?): Long {
+    return when (raw) {
+        is Number -> normalizeEpochMillis(raw.toLong())
+        is String -> parseTimestampString(raw)
+        else -> System.currentTimeMillis()
+    }
+}
+
+private fun parseTimestampString(raw: String): Long {
+    val trimmed = raw.trim()
+    if (trimmed.isEmpty()) return System.currentTimeMillis()
+
+    trimmed.toLongOrNull()?.let { return normalizeEpochMillis(it) }
+
+    runCatching { return Instant.parse(trimmed).toEpochMilli() }
+    runCatching { return OffsetDateTime.parse(trimmed).toInstant().toEpochMilli() }
+    runCatching { return ZonedDateTime.parse(trimmed).toInstant().toEpochMilli() }
+
+    val formats = listOf(
+        "yyyy-MM-dd HH:mm:ss",
+        "yyyy-MM-dd HH:mm:ss.SSS",
+        "yyyy-MM-dd'T'HH:mm:ss",
+        "yyyy-MM-dd'T'HH:mm:ss.SSS",
+        "yyyy-MM-dd'T'HH:mm:ss'Z'",
+        "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+    )
+
+    for (pattern in formats) {
+        val parsed = runCatching {
+            SimpleDateFormat(pattern, Locale.getDefault()).parse(trimmed)?.time
+        }.getOrNull()
+        if (parsed != null) return parsed
+    }
+
+    return System.currentTimeMillis()
 }
 
 private fun String.normalizeUserId(): String {

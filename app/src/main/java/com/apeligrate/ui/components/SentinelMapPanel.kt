@@ -14,7 +14,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -23,6 +26,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.apeligrate.data.local.DeviceCoordinates
 import com.apeligrate.domain.model.IncidentReport
+import com.apeligrate.domain.model.DangerZone
 import com.apeligrate.ui.theme.DarkBackground
 import com.apeligrate.ui.theme.TextSecondary
 import org.osmdroid.config.Configuration
@@ -55,6 +59,7 @@ fun SentinelMapPanel(
     modifier: Modifier = Modifier,
     centerCoordinates: DeviceCoordinates? = null,
     reportMarkers: List<IncidentReport> = emptyList(),
+    dangerZones: List<DangerZone> = emptyList(),
     routePoints: List<DeviceCoordinates> = emptyList(),
     destination: DeviceCoordinates? = null,
     title: String = "Mapa de vigilancia",
@@ -65,6 +70,7 @@ fun SentinelMapPanel(
     val fallbackCoordinates = remember { DeviceCoordinates(-12.0464, -77.0428) }
     val center = centerCoordinates ?: fallbackCoordinates
     val zoom = if (centerCoordinates != null) 16.5 else 12.0
+    var followCenter by remember { mutableStateOf(true) }
     val markers = remember(centerCoordinates, reportMarkers, destination) {
         buildMarkers(centerCoordinates, reportMarkers, destination)
     }
@@ -110,9 +116,10 @@ fun SentinelMapPanel(
                             
                             // BLOQUEAR EL SCROLL DEL PADRE AL INTERACTUAR CON EL MAPA
                             setOnTouchListener { v: View, event: MotionEvent ->
-                                when (event.action) {
-                                    MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                                when (event.actionMasked) {
+                                    MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE, MotionEvent.ACTION_POINTER_DOWN -> {
                                         v.parent.requestDisallowInterceptTouchEvent(true)
+                                        followCenter = false
                                     }
                                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                                         v.parent.requestDisallowInterceptTouchEvent(false)
@@ -124,8 +131,10 @@ fun SentinelMapPanel(
                     },
                     update = { view ->
                         // Center and zoom
-                        view.controller.setZoom(zoom)
-                        view.controller.setCenter(GeoPoint(center.latitude, center.longitude))
+                        if (followCenter) {
+                            view.controller.setZoom(zoom)
+                            view.controller.setCenter(GeoPoint(center.latitude, center.longitude))
+                        }
                         
                         view.overlays.clear()
 
@@ -154,10 +163,13 @@ fun SentinelMapPanel(
                             view.overlays.add(MapEventsOverlay(eventsReceiver))
                         }
                         
-                        // Radios de reportes con colores específicos por tipo
-                        markers.filter { it.kind == MarkerKind.REPORT }.forEach { point ->
-                            val colorInt = getCategoryColor(point.category)
-                            val circlePoints = Polygon.pointsAsCircle(GeoPoint(point.latitude, point.longitude), 150.0)
+                        // Zonas de peligro agrupadas o individuales
+                        dangerZones.forEach { zone ->
+                            val colorInt = getCategoryColor(zone.primaryReport.title)
+                            val circlePoints = Polygon.pointsAsCircle(
+                                GeoPoint(zone.centerLatitude, zone.centerLongitude),
+                                zone.radiusMeters.toDouble()
+                            )
                             val circle = Polygon(view).apply {
                                 points = circlePoints
                                 fillColor = android.graphics.Color.argb(
@@ -172,7 +184,7 @@ fun SentinelMapPanel(
                                     android.graphics.Color.green(colorInt), 
                                     android.graphics.Color.blue(colorInt)
                                 )
-                                strokeWidth = 2f
+                                strokeWidth = if (zone.grouped) 3f else 2f
                             }
                             view.overlays.add(circle)
                         }
