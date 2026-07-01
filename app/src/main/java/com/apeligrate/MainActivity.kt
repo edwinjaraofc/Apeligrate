@@ -39,10 +39,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.apeligrate.data.local.DeviceCoordinates
 import com.apeligrate.data.remote.RouteService
+import com.apeligrate.domain.model.Alert
 import com.apeligrate.domain.model.Contact
 import com.apeligrate.domain.model.IncidentReport
 import com.apeligrate.domain.model.User
@@ -132,8 +134,16 @@ class MainActivity : ComponentActivity() {
                         }
                         "main" -> {
                             val mainViewModel: MainViewModel = viewModel()
+                            val mainUiState by mainViewModel.uiState.collectAsState()
                             val profileViewModel = remember { ProfileViewModel(userProgressRepository) }
                             val userId by sessionManager.userIdFlow.collectAsState(initial = null)
+                            var showProximityAlertCard by remember { mutableStateOf(false) }
+
+                            LaunchedEffect(mainUiState.proximityAlert) {
+                                if (mainUiState.proximityAlert == null) {
+                                    showProximityAlertCard = false
+                                }
+                            }
                             
                             LaunchedEffect(userId) {
                                 userId?.let {
@@ -175,6 +185,13 @@ class MainActivity : ComponentActivity() {
                                         topBar = {
                                             SentinelTopBar(
                                                 onMenuClick = { coroutineScope.launch { drawerState.open() } },
+                                                safetyLabel = if (mainUiState.proximityAlert != null) "Zona peligrosa" else "Zona segura",
+                                                safetyIsDanger = mainUiState.proximityAlert != null,
+                                                onSafetyClick = {
+                                                    if (mainUiState.proximityAlert != null) {
+                                                        showProximityAlertCard = true
+                                                    }
+                                                },
                                                 onLogoutClick = {
                                                     coroutineScope.launch {
                                                         authRepository.logout()
@@ -197,6 +214,21 @@ class MainActivity : ComponentActivity() {
                                         }
                                     ) { innerPadding ->
                                         Box(modifier = Modifier.padding(innerPadding)) {
+                                            if (showProximityAlertCard && mainUiState.proximityAlert != null) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                                                        .align(Alignment.TopCenter)
+                                                        .zIndex(10f)
+                                                ) {
+                                                    ProximityAlertCard(
+                                                        alert = mainUiState.proximityAlert!!,
+                                                        onDismiss = { showProximityAlertCard = false }
+                                                    )
+                                                }
+                                            }
+
                                             if (detailReport != null) {
                                                 ReportDetailScreen(
                                                     report = detailReport!!,
@@ -461,8 +493,23 @@ fun DrawerTabItem(icon: ImageVector, label: String, isSelected: Boolean = false,
 }
 
 @Composable
-fun SentinelTopBar(onMenuClick: () -> Unit, onLogoutClick: () -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().statusBarsPadding().height(64.dp).background(Color(0xCC131313)).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+fun SentinelTopBar(
+    onMenuClick: () -> Unit,
+    safetyLabel: String,
+    safetyIsDanger: Boolean,
+    onSafetyClick: () -> Unit,
+    onLogoutClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .height(64.dp)
+            .background(Color(0xCC131313))
+            .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
             IconButton(onClick = onMenuClick) { Icon(Icons.Default.Menu, contentDescription = "Menu", tint = MaterialTheme.colorScheme.primary) }
             Spacer(modifier = Modifier.width(4.dp))
@@ -475,10 +522,80 @@ fun SentinelTopBar(onMenuClick: () -> Unit, onLogoutClick: () -> Unit) {
                 overflow = TextOverflow.Ellipsis
             )
         }
+
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(
+                    if (safetyIsDanger) Color(0x33FF4D4D) else Color(0x3322C55E)
+                )
+                .border(
+                    1.dp,
+                    if (safetyIsDanger) Color(0x55FF6B6B) else Color(0x6655D38C),
+                    RoundedCornerShape(999.dp)
+                )
+                .clickable(enabled = safetyIsDanger, onClick = onSafetyClick)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = if (safetyIsDanger) Icons.Default.Warning else Icons.Default.CheckCircle,
+                contentDescription = null,
+                tint = if (safetyIsDanger) Color(0xFFFFB3B3) else Color(0xFFB7F5CC),
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = safetyLabel,
+                color = if (safetyIsDanger) Color(0xFFFFD6D6) else Color(0xFFD7FBE3),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                softWrap = false
+            )
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
         Row(modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x33FF4D4D)).border(1.dp, Color(0x55FF6B6B), RoundedCornerShape(999.dp)).clickable(onClick = onLogoutClick).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(imageVector = Icons.AutoMirrored.Filled.Logout, contentDescription = "Cerrar sesión", tint = Color(0xFFFFB3B3), modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(6.dp))
             Text(text = "Salir", color = Color(0xFFFFD6D6), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, softWrap = false)
+        }
+    }
+}
+
+@Composable
+fun ProximityAlertCard(alert: Alert, onDismiss: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFF5252))
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.Warning, contentDescription = null, tint = Color.White)
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "ALERTA CERCANA!",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color.White,
+                    fontWeight = FontWeight.Black
+                )
+                Text(
+                    text = alert.title,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            IconButton(onClick = onDismiss) {
+                Icon(Icons.Default.Close, contentDescription = null, tint = Color.White)
+            }
         }
     }
 }

@@ -5,21 +5,15 @@ import android.location.Location
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Directions
-import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
@@ -79,6 +73,7 @@ fun MainScreen(
     val locationProvider = remember(context) { DeviceLocationProvider(context) }
     var deviceCoordinates by remember { mutableStateOf<DeviceCoordinates?>(null) }
     var destinationText by remember { mutableStateOf("") }
+    var isPickingDestination by remember { mutableStateOf(false) }
     var locationUpdatesEnabled by remember { mutableStateOf(locationProvider.hasLocationPermission()) }
     var shouldRequestNotifications by remember { mutableStateOf(false) }
     val sortedAlerts = remember(uiState.alerts, uiState.userLocation) {
@@ -181,47 +176,6 @@ fun MainScreen(
             contentPadding = PaddingValues(top = 16.dp, bottom = 24.dp)
         ) {
             item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "SENTINEL SYSTEM",
-                            style = MaterialTheme.typography.headlineSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = 2.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = "ESTADO: VIGILANCIA ACTIVA",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = SafeGreen,
-                        )
-                    }
-
-                    Surface(
-                        onClick = { viewModel.triggerTestNotification() },
-                        color = Color.White.copy(alpha = 0.1f),
-                        shape = CircleShape,
-                        modifier = Modifier.size(48.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.NotificationsActive,
-                                contentDescription = "Test Alerta",
-                                tint = Color(0xFFFF5252),
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
-                }
-            }
-
-            item {
                 OutlinedTextField(
                     value = destinationText,
                     onValueChange = { destinationText = it },
@@ -232,6 +186,7 @@ fun MainScreen(
                         if (destinationText.isNotEmpty() || uiState.destination != null) {
                             IconButton(onClick = {
                                 destinationText = ""
+                                isPickingDestination = false
                                 viewModel.clearRoute()
                             }) {
                                 Icon(Icons.Default.Clear, contentDescription = null, tint = Color.Gray)
@@ -251,6 +206,34 @@ fun MainScreen(
                 )
             }
 
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.05f)),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = if (isPickingDestination) {
+                                "Toca un punto del mapa para fijar tu destino."
+                            } else {
+                                "Selecciona un destino desde el mapa o desde una sugerencia."
+                            },
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        SentinelButton(
+                            text = if (isPickingDestination) "Cancelar selección" else "Elegir destino en mapa",
+                            onClick = { isPickingDestination = !isPickingDestination },
+                            isPrimary = !isPickingDestination
+                        )
+                    }
+                }
+            }
+
             if (uiState.destination == null) {
                 item {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -258,6 +241,7 @@ fun MainScreen(
                             SuggestionChip(
                                 onClick = {
                                     destinationText = place.name
+                                    isPickingDestination = false
                                     viewModel.setDestination(place.lat, place.lng)
                                 },
                                 label = { Text(place.name, color = Color.White, maxLines = 1) },
@@ -275,16 +259,14 @@ fun MainScreen(
                 item {
                     Button(
                         onClick = {
-                            deviceCoordinates?.let {
-                                viewModel.setDestination(it.latitude + 0.005, it.longitude + 0.005)
-                            } ?: viewModel.setDestination(-12.0673, -77.0336)
+                            isPickingDestination = true
                         },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                     ) {
                         Icon(Icons.Default.Directions, contentDescription = null, tint = Color.Black)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Trazar Ruta Segura", fontWeight = FontWeight.Bold, color = Color.Black)
+                        Text("Elegir en mapa", fontWeight = FontWeight.Bold, color = Color.Black)
                     }
                 }
             }
@@ -313,11 +295,18 @@ fun MainScreen(
 
             item {
                 SentinelMapPanel(
-                    centerCoordinates = uiState.focusedLocation ?: deviceCoordinates,
+                    centerCoordinates = uiState.focusedLocation ?: uiState.userLocation ?: deviceCoordinates,
+                    userCoordinates = uiState.userLocation ?: deviceCoordinates,
                     reportMarkers = incidentReports,
                     dangerZones = uiState.dangerZones,
                     routePoints = uiState.currentRoutePoints,
                     destination = uiState.destination,
+                    isPickerMode = isPickingDestination,
+                    onLocationPicked = { latitude, longitude ->
+                        destinationText = "Destino seleccionado"
+                        viewModel.setDestination(latitude, longitude)
+                        isPickingDestination = false
+                    },
                     title = if (uiState.destination != null) "Navegacion Activa" else "Mapa de vigilancia",
                     subtitle = if (uiState.dangerOnRoute) "Evita las zonas marcadas en rojo." else "Ruta despejada hasta el destino."
                 )
@@ -369,55 +358,6 @@ fun MainScreen(
             }
         }
 
-        AnimatedVisibility(
-            visible = uiState.proximityAlert != null,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = 80.dp, start = 16.dp, end = 16.dp)
-        ) {
-            uiState.proximityAlert?.let { alert ->
-                ProximityAlertCard(
-                    alert = alert,
-                    onDismiss = { viewModel.dismissProximityAlert() }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun ProximityAlertCard(alert: Alert, onDismiss: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFFF5252))
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(Icons.Default.Warning, contentDescription = null, tint = Color.White)
-            Spacer(modifier = Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "ALERTA CERCANA!",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = Color.White,
-                    fontWeight = FontWeight.Black
-                )
-                Text(
-                    text = alert.title,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.White,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-            IconButton(onClick = onDismiss) {
-                Icon(Icons.Default.Close, contentDescription = null, tint = Color.White)
-            }
-        }
     }
 }
 
