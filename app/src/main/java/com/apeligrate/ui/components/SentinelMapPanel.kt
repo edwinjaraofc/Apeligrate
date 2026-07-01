@@ -58,6 +58,7 @@ private enum class MarkerKind {
 fun SentinelMapPanel(
     modifier: Modifier = Modifier,
     centerCoordinates: DeviceCoordinates? = null,
+    userCoordinates: DeviceCoordinates? = null,
     reportMarkers: List<IncidentReport> = emptyList(),
     dangerZones: List<DangerZone> = emptyList(),
     routePoints: List<DeviceCoordinates> = emptyList(),
@@ -71,8 +72,8 @@ fun SentinelMapPanel(
     val center = centerCoordinates ?: fallbackCoordinates
     val zoom = if (centerCoordinates != null) 16.5 else 12.0
     var followCenter by remember { mutableStateOf(true) }
-    val markers = remember(centerCoordinates, reportMarkers, destination) {
-        buildMarkers(centerCoordinates, reportMarkers, destination)
+    val markers = remember(userCoordinates, reportMarkers, destination) {
+        buildMarkers(userCoordinates, reportMarkers, destination)
     }
 
     SentinelCard(modifier = modifier.fillMaxWidth()) {
@@ -195,19 +196,20 @@ fun SentinelMapPanel(
                                 position = GeoPoint(point.latitude, point.longitude)
                                 setTitle(point.label)
                                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                                icon = ContextCompat.getDrawable(
-                                    view.context,
-                                    org.osmdroid.library.R.drawable.marker_default
-                                )?.mutate()?.apply {
-                                    setTint(
-                                        when (point.kind) {
-                                            MarkerKind.USER -> android.graphics.Color.parseColor("#2A9D8F")
-                                            MarkerKind.REPORT -> getCategoryColor(point.category)
-                                            MarkerKind.PICKER -> android.graphics.Color.parseColor("#FFC107")
-                                            MarkerKind.DESTINATION -> android.graphics.Color.parseColor("#FF5252")
-                                        }
-                                    )
-                                }
+                                icon = buildMarkerDrawable(
+                                    view = view,
+                                    color = when (point.kind) {
+                                        MarkerKind.USER -> android.graphics.Color.parseColor("#1B5E20")
+                                        MarkerKind.REPORT -> getCategoryColor(point.category)
+                                        MarkerKind.PICKER -> android.graphics.Color.parseColor("#FFC107")
+                                        MarkerKind.DESTINATION -> android.graphics.Color.parseColor("#7CFFB2")
+                                    },
+                                    scale = when (point.kind) {
+                                        MarkerKind.USER -> 1.25f
+                                        MarkerKind.DESTINATION -> 1.35f
+                                        else -> 1.0f
+                                    }
+                                )
                             }.also(view.overlays::add)
                         }
                         view.invalidate()
@@ -230,7 +232,7 @@ private fun getCategoryColor(category: String): Int {
 }
 
 private fun buildMarkers(
-    centerCoordinates: DeviceCoordinates?,
+    userCoordinates: DeviceCoordinates?,
     reportMarkers: List<IncidentReport>,
     destination: DeviceCoordinates? = null
 ): List<MapMarker> {
@@ -251,11 +253,11 @@ private fun buildMarkers(
     }
 
     return buildList {
-        if (centerCoordinates != null) {
+        if (userCoordinates != null) {
             add(
                 MapMarker(
-                    latitude = centerCoordinates.latitude,
-                    longitude = centerCoordinates.longitude,
+                    latitude = userCoordinates.latitude,
+                    longitude = userCoordinates.longitude,
                     label = "Tu ubicación",
                     kind = MarkerKind.USER
                 )
@@ -272,8 +274,26 @@ private fun buildMarkers(
             )
         }
         addAll(publicReports)
-        if (publicReports.isEmpty() && centerCoordinates == null) {
+        if (publicReports.isEmpty() && userCoordinates == null) {
             add(MapMarker(-12.0464, -77.0428, "Centro de monitoreo", MarkerKind.REPORT, "Zona peligrosa"))
+        }
+    }
+}
+
+private fun buildMarkerDrawable(
+    view: MapView,
+    color: Int,
+    scale: Float = 1.0f
+): android.graphics.drawable.Drawable? {
+    return ContextCompat.getDrawable(
+        view.context,
+        org.osmdroid.library.R.drawable.marker_default
+    )?.mutate()?.apply {
+        setTint(color)
+        if (intrinsicWidth > 0 && intrinsicHeight > 0) {
+            val width = (intrinsicWidth * scale).toInt().coerceAtLeast(1)
+            val height = (intrinsicHeight * scale).toInt().coerceAtLeast(1)
+            setBounds(0, 0, width, height)
         }
     }
 }

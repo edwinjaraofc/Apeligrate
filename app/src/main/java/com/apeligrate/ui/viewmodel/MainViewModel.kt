@@ -15,7 +15,7 @@ import com.apeligrate.domain.use_case.GetLatestAlertsUseCase
 import com.apeligrate.util.NotificationHelper
 import com.apeligrate.util.DangerZoneAggregator
 import com.apeligrate.util.GeofenceManager
-import com.apeligrate.util.PolylineUtil
+import com.apeligrate.util.SafeRoutePlanner
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,6 +45,7 @@ class MainViewModel(
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
 
     private val notifiedZoneIds = mutableSetOf<String>()
+    private var safeRoutePlanner: SafeRoutePlanner? = null
 
     init {
         Log.d("MainViewModel", "🎬 INIT: ViewModel creado")
@@ -63,6 +64,7 @@ class MainViewModel(
     fun setRouteService(service: RouteService) {
         Log.d("MainViewModel", "📡 RouteService configurado")
         this.routeService = service
+        this.safeRoutePlanner = SafeRoutePlanner(service)
         
         // Recalcular ruta si ya existe un destino y ubicación de usuario
         val origin = _uiState.value.userLocation
@@ -151,30 +153,38 @@ class MainViewModel(
     }
 
     fun calculateRoute(origin: DeviceCoordinates, destination: DeviceCoordinates) {
-        if (routeService != null) {
-            Log.d("MainViewModel", "🛣️ Calculando ruta real (OSRM)...")
+        val planner = safeRoutePlanner
+        if (planner != null) {
+            Log.d("MainViewModel", "🛣️ Calculando ruta segura...")
             viewModelScope.launch {
                 try {
-                    val coordinates = "${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}"
-                    val response = routeService?.getRoute(coordinates)
-                    val encodedPolyline = response?.routes?.firstOrNull()?.geometry
-                    
-                    if (encodedPolyline != null) {
-                        Log.d("MainViewModel", "✅ Ruta obtenida con éxito")
-                        val points = PolylineUtil.decode(encodedPolyline)
-                        _uiState.update { it.copy(currentRoutePoints = points) }
-                        checkDangerOnRoute(points)
+                    val zones = currentDangerZones()
+                    val result = planner.planSafeRoute(origin, destination, zones)
+                    if (result != null) {
+                        Log.d("MainViewModel", "✅ Ruta segura obtenida")
+                        _uiState.update {
+                            it.copy(
+                                currentRoutePoints = result.points,
+                                dangerOnRoute = result.touchedZones > 0
+                            )
+                        }
+                        if (result.touchedZones > 0) {
+                            notificationHelper?.showProximityAlert(
+                                "Ruta con riesgo",
+                                "Se eligio la mejor ruta disponible, pero aun cruza zonas peligrosas."
+                            )
+                        }
                     } else {
-                        Log.w("MainViewModel", "⚠️ OSRM no devolvió geometría, usando línea recta")
+                        Log.w("MainViewModel", "⚠️ No se pudo calcular ruta segura, usando línea recta")
                         calculateStraightRoute(origin, destination)
                     }
                 } catch (e: Exception) {
-                    Log.e("MainViewModel", "❌ Error calculando ruta por calles: ${e.message}")
+                    Log.e("MainViewModel", "❌ Error calculando ruta segura: ${e.message}")
                     calculateStraightRoute(origin, destination)
                 }
             }
         } else {
-            Log.w("MainViewModel", "⚠️ RouteService nulo, usando línea recta")
+            Log.w("MainViewModel", "⚠️ SafeRoutePlanner nulo, usando línea recta")
             calculateStraightRoute(origin, destination)
         }
     }
@@ -194,9 +204,7 @@ class MainViewModel(
     }
 
     private fun checkDangerOnRoute(route: List<DeviceCoordinates>) {
-        val zones = _uiState.value.dangerZones.ifEmpty {
-            geofenceManager?.buildDangerZones(_uiState.value.alerts) ?: emptyList()
-        }
+        val zones = currentDangerZones()
         var dangerFound = false
 
         for (point in route) {
@@ -220,6 +228,12 @@ class MainViewModel(
         _uiState.update { it.copy(dangerOnRoute = dangerFound) }
         if (dangerFound) {
             notificationHelper?.showProximityAlert("Ruta Peligrosa", "Incidente detectado en tu camino exacto.")
+        }
+    }
+
+    private fun currentDangerZones(): List<DangerZone> {
+        return _uiState.value.dangerZones.ifEmpty {
+            geofenceManager?.buildDangerZones(_uiState.value.alerts) ?: emptyList()
         }
     }
 

@@ -18,10 +18,12 @@ data class OSRMRoute(
 
 interface RouteService {
     @Headers("User-Agent: Apeligrate-Android-App")
-    @GET("route/v1/driving/{coordinates}")
+    @GET("route/v1/foot/{coordinates}")
     suspend fun getRoute(
         @Path("coordinates") coordinates: String,
         @Query("overview") overview: String = "full",
-        @Query("geometries") geometries: String = "polyline"
+        @Query("geometries") geometries: String = "polyline",
+        @Query("alternatives") alternatives: Boolean = true,
+        @Query("continue_straight") continueStraight: Boolean = true
     ): OSRMResponse
 }
