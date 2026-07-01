@@ -16,6 +16,7 @@ import com.apeligrate.util.NotificationHelper
 import com.apeligrate.util.DangerZoneAggregator
 import com.apeligrate.util.GeofenceManager
 import com.apeligrate.util.SafeRoutePlanner
+import com.apeligrate.util.NetworkConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -93,8 +94,25 @@ class MainViewModel(
 
     fun onLocationUpdated(latitude: Double, longitude: Double) {
         val userLoc = DeviceCoordinates(latitude, longitude)
+        val oldLoc = _uiState.value.userLocation
         _uiState.update { it.copy(userLocation = userLoc) }
         checkProximity(latitude, longitude)
+        
+        // Recalcular ruta automáticamente si hay un destino fijado y el usuario se movió significativamente (> 10m)
+        val dest = _uiState.value.destination
+        if (dest != null) {
+            val shouldRecalculate = if (oldLoc == null) {
+                true
+            } else {
+                val results = FloatArray(1)
+                Location.distanceBetween(oldLoc.latitude, oldLoc.longitude, userLoc.latitude, userLoc.longitude, results)
+                results[0] > 10
+            }
+            
+            if (shouldRecalculate) {
+                calculateRoute(userLoc, dest)
+            }
+        }
     }
 
     private fun checkProximity(latitude: Double, longitude: Double) {
@@ -155,13 +173,22 @@ class MainViewModel(
     fun calculateRoute(origin: DeviceCoordinates, destination: DeviceCoordinates) {
         val planner = safeRoutePlanner
         if (planner != null) {
-            Log.d("MainViewModel", "🛣️ Calculando ruta segura...")
+            Log.d("MainViewModel", "🛣️ Iniciando cálculo de ruta por calles...")
             viewModelScope.launch {
                 try {
                     val zones = currentDangerZones()
-                    val result = planner.planSafeRoute(origin, destination, zones)
+                    
+                    // Intento 1: Ruta segura evitando zonas de peligro
+                    var result = planner.planSafeRoute(origin, destination, zones, NetworkConfig.ORS_API_KEY)
+                    
+                    // Intento 2: Si la ruta segura falla (ej. destino bloqueado), intentar ruta normal por calles
+                    if (result == null && zones.isNotEmpty()) {
+                        Log.w("MainViewModel", "⚠️ Ruta segura falló o está bloqueada, intentando ruta normal por calles...")
+                        result = planner.planSafeRoute(origin, destination, emptyList(), NetworkConfig.ORS_API_KEY)
+                    }
+
                     if (result != null) {
-                        Log.d("MainViewModel", "✅ Ruta segura obtenida")
+                        Log.d("MainViewModel", "✅ Ruta por calles obtenida con ${result.points.size} puntos")
                         _uiState.update {
                             it.copy(
                                 currentRoutePoints = result.points,
@@ -171,20 +198,20 @@ class MainViewModel(
                         if (result.touchedZones > 0) {
                             notificationHelper?.showProximityAlert(
                                 "Ruta con riesgo",
-                                "Se eligio la mejor ruta disponible, pero aun cruza zonas peligrosas."
+                                "Se eligió la mejor ruta disponible, pero cruza algunas zonas de reporte."
                             )
                         }
                     } else {
-                        Log.w("MainViewModel", "⚠️ No se pudo calcular ruta segura, usando línea recta")
+                        Log.e("MainViewModel", "❌ El servicio de mapas no devolvió ninguna ruta, usando línea recta como último recurso")
                         calculateStraightRoute(origin, destination)
                     }
                 } catch (e: Exception) {
-                    Log.e("MainViewModel", "❌ Error calculando ruta segura: ${e.message}")
+                    Log.e("MainViewModel", "❌ Error en el proceso de navegación: ${e.message}")
                     calculateStraightRoute(origin, destination)
                 }
             }
         } else {
-            Log.w("MainViewModel", "⚠️ SafeRoutePlanner nulo, usando línea recta")
+            Log.w("MainViewModel", "⚠️ SafeRoutePlanner no inicializado, usando línea recta")
             calculateStraightRoute(origin, destination)
         }
     }

@@ -115,7 +115,6 @@ fun SentinelMapPanel(
                             minZoomLevel = 4.0
                             maxZoomLevel = 19.0
                             
-                            // BLOQUEAR EL SCROLL DEL PADRE AL INTERACTUAR CON EL MAPA
                             setOnTouchListener { v: View, event: MotionEvent ->
                                 when (event.actionMasked) {
                                     MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE, MotionEvent.ACTION_POINTER_DOWN -> {
@@ -126,12 +125,11 @@ fun SentinelMapPanel(
                                         v.parent.requestDisallowInterceptTouchEvent(false)
                                     }
                                 }
-                                false // Permitir que el mapa maneje sus propios gestos
+                                false
                             }
                         }
                     },
                     update = { view ->
-                        // Center and zoom
                         if (followCenter) {
                             view.controller.setZoom(zoom)
                             view.controller.setCenter(GeoPoint(center.latitude, center.longitude))
@@ -139,7 +137,7 @@ fun SentinelMapPanel(
                         
                         view.overlays.clear()
 
-                        // Trazar Ruta (Polyline)
+                        // Trazar Ruta
                         if (routePoints.isNotEmpty()) {
                             val line = Polyline(view)
                             val geoPoints = ArrayList<GeoPoint>()
@@ -164,7 +162,7 @@ fun SentinelMapPanel(
                             view.overlays.add(MapEventsOverlay(eventsReceiver))
                         }
                         
-                        // Zonas de peligro agrupadas o individuales
+                        // Zonas de peligro (ahora para todos los tipos de delito)
                         dangerZones.forEach { zone ->
                             val colorInt = getCategoryColor(zone.primaryReport.title)
                             val circlePoints = Polygon.pointsAsCircle(
@@ -173,19 +171,21 @@ fun SentinelMapPanel(
                             )
                             val circle = Polygon(view).apply {
                                 points = circlePoints
+                                // Aumentamos la opacidad para que sea más visible (80/255 aprox 30%)
                                 fillColor = android.graphics.Color.argb(
-                                    50, 
+                                    80, 
                                     android.graphics.Color.red(colorInt), 
                                     android.graphics.Color.green(colorInt), 
                                     android.graphics.Color.blue(colorInt)
                                 )
+                                // Borde más marcado (160/255 aprox 60%)
                                 strokeColor = android.graphics.Color.argb(
-                                    100, 
+                                    160, 
                                     android.graphics.Color.red(colorInt), 
                                     android.graphics.Color.green(colorInt), 
                                     android.graphics.Color.blue(colorInt)
                                 )
-                                strokeWidth = if (zone.grouped) 3f else 2f
+                                strokeWidth = if (zone.grouped) 4f else 2.5f
                             }
                             view.overlays.add(circle)
                         }
@@ -222,11 +222,12 @@ fun SentinelMapPanel(
 
 private fun getCategoryColor(category: String): Int {
     return when (category) {
-        "Robo a mano armada" -> android.graphics.Color.parseColor("#FF5252")
-        "Hurto/Arrebato" -> android.graphics.Color.parseColor("#FF7043")
-        "Acoso" -> android.graphics.Color.parseColor("#E91E63")
-        "Zona peligrosa" -> android.graphics.Color.parseColor("#FFC107")
-        "Calle sin iluminacion" -> android.graphics.Color.parseColor("#90A4AE")
+        "Robo a mano armada" -> android.graphics.Color.parseColor("#FF5252") // Rojo
+        "Hurto/Arrebato" -> android.graphics.Color.parseColor("#FF7043")    // Naranja
+        "Acoso" -> android.graphics.Color.parseColor("#E91E63")            // Rosado/Fucsia
+        "Zona peligrosa" -> android.graphics.Color.parseColor("#FFC107")   // Ambar
+        "Calle sin iluminacion" -> android.graphics.Color.parseColor("#90A4AE") // Gris azulado
+        "Nuevo Reporte" -> android.graphics.Color.parseColor("#FF535B")     // Rojo coral
         else -> android.graphics.Color.parseColor("#FF535B")
     }
 }
@@ -254,24 +255,10 @@ private fun buildMarkers(
 
     return buildList {
         if (userCoordinates != null) {
-            add(
-                MapMarker(
-                    latitude = userCoordinates.latitude,
-                    longitude = userCoordinates.longitude,
-                    label = "Tu ubicación",
-                    kind = MarkerKind.USER
-                )
-            )
+            add(MapMarker(userCoordinates.latitude, userCoordinates.longitude, "Tu ubicación", MarkerKind.USER))
         }
         if (destination != null) {
-            add(
-                MapMarker(
-                    latitude = destination.latitude,
-                    longitude = destination.longitude,
-                    label = "Destino",
-                    kind = MarkerKind.DESTINATION
-                )
-            )
+            add(MapMarker(destination.latitude, destination.longitude, "Destino", MarkerKind.DESTINATION))
         }
         addAll(publicReports)
         if (publicReports.isEmpty() && userCoordinates == null) {

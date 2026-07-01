@@ -82,7 +82,7 @@ class MainActivity : ComponentActivity() {
 
     private val routeService by lazy {
         Retrofit.Builder()
-            .baseUrl("https://router.project-osrm.org/")
+            .baseUrl("https://api.openrouteservice.org/")
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(RouteService::class.java)
