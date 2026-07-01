@@ -800,8 +800,11 @@ fun HistoryScreen(
     onReportClick: (IncidentReport) -> Unit
 ) {
     val reports by repository.getReports().collectAsState(initial = emptyList())
-    val myActions = remember(reports, userId) {
-        reports.filter { it.userId == userId }
+    val normalizedUserId = remember(userId) { userId?.normalizeHistoryUserId() }
+    val myActions = remember(reports, normalizedUserId) {
+        reports.filter { report ->
+            report.userId?.normalizeHistoryUserId() == normalizedUserId
+        }
             .sortedByDescending { it.reportedAt }
     }
 
@@ -856,6 +859,15 @@ fun HistoryItem(type: String, detail: String, date: String, onClick: () -> Unit)
         colors = ListItemDefaults.colors(containerColor = Color.Transparent)
     )
     HorizontalDivider(color = Color.White.copy(0.05f))
+}
+
+private fun String.normalizeHistoryUserId(): String {
+    val numericValue = this.toDoubleOrNull() ?: return this
+    return if (numericValue % 1.0 == 0.0) {
+        numericValue.toLong().toString()
+    } else {
+        this
+    }
 }
 
 @Composable

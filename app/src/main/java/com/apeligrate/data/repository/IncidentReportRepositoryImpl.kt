@@ -87,6 +87,7 @@ class IncidentReportRepositoryImpl : IncidentReportRepository {
                     id = generateId()
                 )
                 reportsFlow.value = listOf(createdReport) + reportsFlow.value
+                refreshReports()
                 Log.d(TAG, "Reporte guardado remotamente: ${createdReport.id}")
                 Result.success(createdReport)
             } catch (e: Exception) {
@@ -182,7 +183,7 @@ class IncidentReportRepositoryImpl : IncidentReportRepository {
         }
     }
 
-    private suspend fun refreshReports() {
+    override suspend fun refreshReports() {
         runCatching {
             val reports = api.getIncidentReports().mapNotNull { raw ->
                 runCatching { raw.toIncidentReport() }.getOrNull()

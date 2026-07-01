@@ -187,8 +187,31 @@ fun ProfileScreen(
                 }
             }
 
-            items(user.achievements) { achievement ->
-                AchievementItem(achievement)
+            if (user.achievements.isEmpty()) {
+                item {
+                    GlassPanel(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "Aun no tienes logros desbloqueados.",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Reporta y valida incidentes para subir de nivel y conseguir insignias.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.Gray
+                            )
+                        }
+                    }
+                }
+            } else {
+                items(user.achievements) { achievement ->
+                    AchievementItem(achievement)
+                }
             }
 
             // Edit Profile Button

@@ -5,13 +5,27 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationManager
-import android.os.Build
 import androidx.core.content.ContextCompat
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import android.os.Looper
 
 data class DeviceCoordinates(
     val latitude: Double,
     val longitude: Double
 )
+
+fun interface LocationUpdatesHandle {
+    fun stop()
+}
+
+private const val MAX_STALE_LOCATION_MS = 15_000L
+private const val MAX_ACCEPTABLE_ACCURACY_METERS = 35f
+private const val LOCATION_UPDATE_INTERVAL_MS = 2_000L
+private const val LOCATION_MIN_UPDATE_INTERVAL_MS = 1_000L
 
 class DeviceLocationProvider(
     context: Context
@@ -19,6 +33,7 @@ class DeviceLocationProvider(
     private val appContext = context.applicationContext
     private val locationManager =
         appContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(appContext)
 
     fun hasLocationPermission(): Boolean {
         val fineGranted = ContextCompat.checkSelfPermission(
@@ -59,16 +74,57 @@ class DeviceLocationProvider(
             onResult(cachedLocation.toCoordinates())
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            locationManager.getCurrentLocation(
-                provider,
-                null,
-                ContextCompat.getMainExecutor(appContext)
-            ) { location: Location? ->
+        fusedLocationClient.lastLocation
+            .addOnSuccessListener { location ->
                 onResult(location?.toCoordinates() ?: cachedLocation?.toCoordinates())
             }
-        } else {
-            onResult(cachedLocation?.toCoordinates())
+            .addOnFailureListener {
+                onResult(cachedLocation?.toCoordinates())
+            }
+    }
+
+    fun startLocationUpdates(
+        onLocationChanged: (DeviceCoordinates) -> Unit
+    ): LocationUpdatesHandle? {
+        if (!hasLocationPermission()) return null
+
+        var lastDeliveredElapsedNanos = 0L
+        val callback = object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) {
+                result.locations.forEach { location ->
+                    if (!location.isFreshEnough()) return@forEach
+                    if (location.accuracy > MAX_ACCEPTABLE_ACCURACY_METERS) return@forEach
+                    if (location.elapsedRealtimeNanos <= lastDeliveredElapsedNanos) return@forEach
+
+                    lastDeliveredElapsedNanos = location.elapsedRealtimeNanos
+                    onLocationChanged(location.toCoordinates())
+                }
+            }
+        }
+
+        bestLastKnownLocation()
+            ?.takeIf { it.isFreshEnough() && it.accuracy <= MAX_ACCEPTABLE_ACCURACY_METERS }
+            ?.let { cachedLocation ->
+                lastDeliveredElapsedNanos = cachedLocation.elapsedRealtimeNanos
+                onLocationChanged(cachedLocation.toCoordinates())
+            }
+
+        val request = LocationRequest.Builder(
+            Priority.PRIORITY_HIGH_ACCURACY,
+            LOCATION_UPDATE_INTERVAL_MS
+        )
+            .setMinUpdateIntervalMillis(LOCATION_MIN_UPDATE_INTERVAL_MS)
+            .setWaitForAccurateLocation(false)
+            .build()
+
+        fusedLocationClient.requestLocationUpdates(
+            request,
+            callback,
+            Looper.getMainLooper()
+        )
+
+        return LocationUpdatesHandle {
+            fusedLocationClient.removeLocationUpdates(callback)
         }
     }
 
@@ -87,4 +143,8 @@ private fun Location.toCoordinates(): DeviceCoordinates {
         latitude = latitude,
         longitude = longitude
     )
+}
+
+private fun Location.isFreshEnough(): Boolean {
+    return System.currentTimeMillis() - time <= MAX_STALE_LOCATION_MS
 }
