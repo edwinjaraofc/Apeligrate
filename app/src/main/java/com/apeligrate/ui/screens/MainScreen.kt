@@ -32,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
 import com.apeligrate.data.local.DeviceCoordinates
 import com.apeligrate.data.local.DeviceLocationProvider
@@ -79,6 +80,7 @@ fun MainScreen(
     var deviceCoordinates by remember { mutableStateOf<DeviceCoordinates?>(null) }
     var destinationText by remember { mutableStateOf("") }
     var locationUpdatesEnabled by remember { mutableStateOf(locationProvider.hasLocationPermission()) }
+    var shouldRequestNotifications by remember { mutableStateOf(false) }
     val sortedAlerts = remember(uiState.alerts, uiState.userLocation) {
         sortAlertsByDistance(uiState.alerts, uiState.userLocation)
     }
@@ -86,6 +88,14 @@ fun MainScreen(
     LaunchedEffect(incidentReports) {
         if (incidentReports.isNotEmpty()) {
             viewModel.updateAlertsFromReports(incidentReports)
+        }
+    }
+
+    LaunchedEffect(incidentRepository) {
+        incidentRepository.refreshReports()
+        while (true) {
+            delay(60_000)
+            incidentRepository.refreshReports()
         }
     }
 
@@ -97,11 +107,8 @@ fun MainScreen(
 
         if (granted) {
             locationUpdatesEnabled = true
-            locationProvider.getCurrentCoordinates { coordinates ->
-                deviceCoordinates = coordinates
-                coordinates?.let { viewModel.onLocationUpdated(it.latitude, it.longitude) }
-            }
         }
+        shouldRequestNotifications = true
     }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -113,20 +120,32 @@ fun MainScreen(
     }
 
     LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
-
         if (locationProvider.hasLocationPermission()) {
             locationUpdatesEnabled = true
+            shouldRequestNotifications = true
         } else {
             permissionLauncher.launch(
                 arrayOf(
                     Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION,
-                    Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                    Manifest.permission.ACCESS_COARSE_LOCATION
                 )
             )
+        }
+    }
+
+    LaunchedEffect(shouldRequestNotifications) {
+        if (!shouldRequestNotifications) return@LaunchedEffect
+        shouldRequestNotifications = false
+
+        val notificationsAlreadyGranted =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        if (!notificationsAlreadyGranted) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
@@ -136,15 +155,19 @@ fun MainScreen(
                 deviceCoordinates = coordinates
                 coordinates?.let { viewModel.onLocationUpdated(it.latitude, it.longitude) }
             }
+        }
+    }
 
-            while (true) {
-                delay(5000)
-                locationProvider.getCurrentCoordinates { coordinates ->
-                    if (coordinates != null) {
-                        deviceCoordinates = coordinates
-                        viewModel.onLocationUpdated(coordinates.latitude, coordinates.longitude)
-                    }
-                }
+    DisposableEffect(locationUpdatesEnabled, locationProvider) {
+        if (!locationUpdatesEnabled) {
+            onDispose { }
+        } else {
+            val updatesHandle = locationProvider.startLocationUpdates { coordinates ->
+                deviceCoordinates = coordinates
+                viewModel.onLocationUpdated(coordinates.latitude, coordinates.longitude)
+            }
+            onDispose {
+                updatesHandle?.stop()
             }
         }
     }

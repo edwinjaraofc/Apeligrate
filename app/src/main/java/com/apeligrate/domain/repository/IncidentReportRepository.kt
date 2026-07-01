@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.Flow
 interface IncidentReportRepository {
     suspend fun submitReport(report: IncidentReport): Result<IncidentReport>
     suspend fun voteReport(reportId: String, userId: String, isReal: Boolean): VoteReportResult
+    suspend fun refreshReports()
     fun getReports(): Flow<List<IncidentReport>>
     fun getReportById(id: String): Flow<IncidentReport?>
 }

@@ -68,11 +68,15 @@ fun SentinelMapPanel(
     onLocationPicked: (Double, Double) -> Unit = { _, _ -> }
 ) {
     val fallbackCoordinates = remember { DeviceCoordinates(-12.0464, -77.0428) }
+    var latestUserCoordinates by remember { mutableStateOf(centerCoordinates) }
+    if (centerCoordinates != null && centerCoordinates != latestUserCoordinates) {
+        latestUserCoordinates = centerCoordinates
+    }
     val center = centerCoordinates ?: fallbackCoordinates
     val zoom = if (centerCoordinates != null) 16.5 else 12.0
     var followCenter by remember { mutableStateOf(true) }
-    val markers = remember(centerCoordinates, reportMarkers, destination) {
-        buildMarkers(centerCoordinates, reportMarkers, destination)
+    val markers = remember(latestUserCoordinates, reportMarkers, destination) {
+        buildMarkers(latestUserCoordinates, reportMarkers, destination)
     }
 
     SentinelCard(modifier = modifier.fillMaxWidth()) {
@@ -130,7 +134,9 @@ fun SentinelMapPanel(
                         }
                     },
                     update = { view ->
-                        // Center and zoom
+                        // The user marker always updates with the latest location.
+                        // Auto-centering is handled separately so dragging the map
+                        // does not freeze the marker position.
                         if (followCenter) {
                             view.controller.setZoom(zoom)
                             view.controller.setCenter(GeoPoint(center.latitude, center.longitude))
