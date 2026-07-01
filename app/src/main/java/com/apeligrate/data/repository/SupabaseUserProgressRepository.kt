@@ -22,8 +22,9 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
 private const val TAG = "UserProgressRepo"
-private const val JUSTICE_POINTS_PER_CONFIRMED_FALSE_REPORT = 100
 private const val EXPERIENCE_PER_LEVEL = 100
+private const val POINTS_PER_REPORT = 40
+private const val POINTS_PER_VALIDATION = 15
 
 class SupabaseUserProgressRepository : UserProgressRepository {
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -60,20 +61,17 @@ class SupabaseUserProgressRepository : UserProgressRepository {
 
     override suspend fun recordSubmittedReport(userId: String?) {
         if (userId.isNullOrBlank()) return
-        val user = refreshUser(userId) ?: return
-        updateUser(userId, user.copy(reportsCount = user.reportsCount + 1))
+        refreshUser(userId)
     }
 
     override suspend fun recordValidation(userId: String?) {
         if (userId.isNullOrBlank()) return
-        val user = refreshUser(userId) ?: return
-        updateUser(userId, user.copy(validationsCount = user.validationsCount + 1))
+        refreshUser(userId)
     }
 
     override suspend fun awardJusticePoints(userIds: List<String>) {
         userIds.filter { it.isNotBlank() }.distinct().forEach { userId ->
-            val user = refreshUser(userId) ?: return@forEach
-            updateUser(userId, user.withExperience(user.experience + JUSTICE_POINTS_PER_CONFIRMED_FALSE_REPORT))
+            refreshUser(userId)
         }
     }
 
@@ -100,10 +98,21 @@ class SupabaseUserProgressRepository : UserProgressRepository {
                 null
             } else {
                 val syncedUser = syncUserStats(baseUser)
-                if (syncedUser.reportsCount != baseUser.reportsCount || syncedUser.validationsCount != baseUser.validationsCount) {
+                if (
+                    syncedUser.reportsCount != baseUser.reportsCount ||
+                    syncedUser.validationsCount != baseUser.validationsCount ||
+                    syncedUser.experience != baseUser.experience ||
+                    syncedUser.level != baseUser.level ||
+                    syncedUser.nextLevelExperience != baseUser.nextLevelExperience ||
+                    syncedUser.reputationTitle != baseUser.reputationTitle
+                ) {
                     api.updateUser(
                         id = "eq.$normalizedUserId",
                         body = UpdateUserRequest(
+                            experience = syncedUser.experience,
+                            level = syncedUser.level,
+                            next_level_experience = syncedUser.nextLevelExperience,
+                            reputation_title = syncedUser.reputationTitle,
                             reports_count = syncedUser.reportsCount,
                             validations_count = syncedUser.validationsCount
                         )
@@ -157,10 +166,14 @@ class SupabaseUserProgressRepository : UserProgressRepository {
             select = "report_id",
             userId = "eq.$normalizedUserId"
         )
+        val reportsCount = submittedReports.size
+        val validationsCount = validations.size
+        val experience = (reportsCount * POINTS_PER_REPORT) + (validationsCount * POINTS_PER_VALIDATION)
 
-        return user.copy(
-            reportsCount = submittedReports.size,
-            validationsCount = validations.size
+        return user.withProgress(
+            reportsCount = reportsCount,
+            validationsCount = validationsCount,
+            totalExperience = experience
         )
     }
 }
@@ -184,18 +197,33 @@ private fun Map<String, Any?>.toUser(): User {
         reputationTitle = this["reputation_title"]?.toString().orEmpty().ifBlank { reputationTitleFor(experience) },
         reportsCount = this["reports_count"]?.toString()?.toIntOrNull() ?: 0,
         validationsCount = this["validations_count"]?.toString()?.toIntOrNull() ?: 0,
-        achievements = defaultAchievements()
+        achievements = achievementsFor(
+            reportsCount = this["reports_count"]?.toString()?.toIntOrNull() ?: 0,
+            validationsCount = this["validations_count"]?.toString()?.toIntOrNull() ?: 0,
+            experience = experience
+        )
     )
 }
 
-private fun User.withExperience(totalExperience: Int): User {
+private fun User.withProgress(
+    reportsCount: Int,
+    validationsCount: Int,
+    totalExperience: Int
+): User {
     val normalizedExperience = totalExperience.coerceAtLeast(0)
     val level = (normalizedExperience / EXPERIENCE_PER_LEVEL) + 1
     return copy(
+        reportsCount = reportsCount,
+        validationsCount = validationsCount,
         experience = normalizedExperience,
         level = level,
         nextLevelExperience = level * EXPERIENCE_PER_LEVEL,
-        reputationTitle = reputationTitleFor(normalizedExperience)
+        reputationTitle = reputationTitleFor(normalizedExperience),
+        achievements = achievementsFor(
+            reportsCount = reportsCount,
+            validationsCount = validationsCount,
+            experience = normalizedExperience
+        )
     )
 }
 
@@ -218,21 +246,34 @@ private fun reputationTitleFor(experience: Int): String {
     }
 }
 
-private fun defaultAchievements(): List<Achievement> {
-    return listOf(
-        Achievement(
+private fun achievementsFor(
+    reportsCount: Int,
+    validationsCount: Int,
+    experience: Int
+): List<Achievement> {
+    val achievements = mutableListOf<Achievement>()
+
+    if (validationsCount > 0) {
+        achievements += Achievement(
             id = "1",
             title = "Vigilante",
             description = "Participa activamente validando reportes de la comunidad.",
             iconName = "visibility",
-            colorHex = "#FF5252"
-        ),
-        Achievement(
+            colorHex = "#FF5252",
+            isUnlocked = true
+        )
+    }
+
+    if (experience >= 100 || reportsCount >= 3) {
+        achievements += Achievement(
             id = "2",
             title = "Justiciero",
-            description = "Recibe puntos cuando ayudas a cancelar denuncias falsas.",
+            description = "Construye reputacion ayudando con reportes y validaciones reales.",
             iconName = "star",
-            colorHex = "#FFC107"
+            colorHex = "#FFC107",
+            isUnlocked = true
         )
-    )
+    }
+
+    return achievements
 }
