@@ -1,9 +1,11 @@
 package com.apeligrate.util
 
+import android.Manifest
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import androidx.annotation.RequiresPermission
 import com.google.android.gms.location.Geofence
 import com.google.android.gms.location.GeofencingClient
 import com.google.android.gms.location.GeofencingRequest
@@ -23,6 +25,7 @@ class GeofenceManager(private val context: Context) {
         return DangerZoneAggregator.buildDangerZones(alerts)
     }
 
+    @RequiresPermission(Manifest.permission.ACCESS_FINE_LOCATION)
     fun addGeofences(zones: List<DangerZone>) {
         Log.d(TAG, "📍 Agregando geofences para ${zones.size} zonas")
 
