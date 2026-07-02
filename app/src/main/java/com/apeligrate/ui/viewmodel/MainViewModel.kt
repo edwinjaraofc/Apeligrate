@@ -16,6 +16,7 @@ import com.apeligrate.util.NotificationHelper
 import com.apeligrate.util.DangerZoneAggregator
 import com.apeligrate.util.GeofenceManager
 import com.apeligrate.util.SafeRoutePlanner
+import com.apeligrate.util.NetworkConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,6 +42,13 @@ class MainViewModel(
     private var geofenceManager: GeofenceManager? = null,
     private var routeService: RouteService? = null
 ) : ViewModel() {
+    private data class RouteCandidate(
+        val result: com.apeligrate.util.SafeRouteResult,
+        val touchedZoneCount: Int,
+        val totalRiskScore: Int,
+        val attemptIndex: Int
+    )
+
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
 
@@ -93,8 +101,25 @@ class MainViewModel(
 
     fun onLocationUpdated(latitude: Double, longitude: Double) {
         val userLoc = DeviceCoordinates(latitude, longitude)
+        val oldLoc = _uiState.value.userLocation
         _uiState.update { it.copy(userLocation = userLoc) }
         checkProximity(latitude, longitude)
+        
+        // Recalcular ruta automáticamente si hay un destino fijado y el usuario se movió significativamente (> 10m)
+        val dest = _uiState.value.destination
+        if (dest != null) {
+            val shouldRecalculate = if (oldLoc == null) {
+                true
+            } else {
+                val results = FloatArray(1)
+                Location.distanceBetween(oldLoc.latitude, oldLoc.longitude, userLoc.latitude, userLoc.longitude, results)
+                results[0] > 10
+            }
+            
+            if (shouldRecalculate) {
+                calculateRoute(userLoc, dest)
+            }
+        }
     }
 
     private fun checkProximity(latitude: Double, longitude: Double) {
@@ -155,36 +180,59 @@ class MainViewModel(
     fun calculateRoute(origin: DeviceCoordinates, destination: DeviceCoordinates) {
         val planner = safeRoutePlanner
         if (planner != null) {
-            Log.d("MainViewModel", "🛣️ Calculando ruta segura...")
+            Log.d("MainViewModel", "🛣️ Iniciando cálculo de ruta por calles...")
             viewModelScope.launch {
                 try {
                     val zones = currentDangerZones()
-                    val result = planner.planSafeRoute(origin, destination, zones)
+                    val ignoredZoneIds = zoneIdsContainingPoint(origin, zones)
+                    val zonesForAvoidance = zones.filterNot { it.id in ignoredZoneIds }
+                    val attempts = buildAvoidanceAttempts(zonesForAvoidance)
+                    val routeRiskZones = zones.filterNot { it.id in ignoredZoneIds }
+
+                    val candidates = mutableListOf<RouteCandidate>()
+                    for ((index, attemptZones) in attempts.withIndex()) {
+                        if (index > 0) {
+                            Log.w("MainViewModel", "⚠️ Ajustando evasión de zonas (nivel $index) para encontrar ruta viable...")
+                        }
+                        val attemptResult = planner.planSafeRoute(origin, destination, attemptZones, NetworkConfig.ORS_API_KEY)
+                        if (attemptResult != null) {
+                            candidates.add(
+                                buildRouteCandidate(
+                                    result = attemptResult,
+                                    riskZones = routeRiskZones,
+                                    attemptIndex = index
+                                )
+                            )
+                        }
+                    }
+                    val bestCandidate = selectBestCandidate(candidates)
+                    val result = bestCandidate?.result
+
                     if (result != null) {
-                        Log.d("MainViewModel", "✅ Ruta segura obtenida")
+                        Log.d("MainViewModel", "✅ Ruta por calles obtenida con ${result.points.size} puntos")
                         _uiState.update {
                             it.copy(
                                 currentRoutePoints = result.points,
-                                dangerOnRoute = result.touchedZones > 0
+                                dangerOnRoute = bestCandidate.touchedZoneCount > 0
                             )
                         }
-                        if (result.touchedZones > 0) {
+                        if (bestCandidate.touchedZoneCount > 0) {
                             notificationHelper?.showProximityAlert(
                                 "Ruta con riesgo",
-                                "Se eligio la mejor ruta disponible, pero aun cruza zonas peligrosas."
+                                "Se eligió la mejor ruta disponible, pero cruza algunas zonas de reporte."
                             )
                         }
                     } else {
-                        Log.w("MainViewModel", "⚠️ No se pudo calcular ruta segura, usando línea recta")
+                        Log.e("MainViewModel", "❌ El servicio de mapas no devolvió ninguna ruta, usando línea recta como último recurso")
                         calculateStraightRoute(origin, destination)
                     }
                 } catch (e: Exception) {
-                    Log.e("MainViewModel", "❌ Error calculando ruta segura: ${e.message}")
+                    Log.e("MainViewModel", "❌ Error en el proceso de navegación: ${e.message}")
                     calculateStraightRoute(origin, destination)
                 }
             }
         } else {
-            Log.w("MainViewModel", "⚠️ SafeRoutePlanner nulo, usando línea recta")
+            Log.w("MainViewModel", "⚠️ SafeRoutePlanner no inicializado, usando línea recta")
             calculateStraightRoute(origin, destination)
         }
     }
@@ -205,25 +253,14 @@ class MainViewModel(
 
     private fun checkDangerOnRoute(route: List<DeviceCoordinates>) {
         val zones = currentDangerZones()
-        var dangerFound = false
-
-        for (point in route) {
-            for (zone in zones) {
-                val results = FloatArray(1)
-                Location.distanceBetween(
-                    point.latitude,
-                    point.longitude,
-                    zone.centerLatitude,
-                    zone.centerLongitude,
-                    results
-                )
-                if (results[0] <= zone.radiusMeters) {
-                        dangerFound = true
-                        break
-                }
-            }
-            if (dangerFound) break
+        val startPoint = route.firstOrNull()
+        val ignoredZoneIds = if (startPoint != null) {
+            zoneIdsContainingPoint(startPoint, zones)
+        } else {
+            emptySet()
         }
+        val relevantZones = zones.filterNot { it.id in ignoredZoneIds }
+        val dangerFound = countTouchedZonesOnRoute(route, relevantZones) > 0
         
         _uiState.update { it.copy(dangerOnRoute = dangerFound) }
         if (dangerFound) {
@@ -235,6 +272,123 @@ class MainViewModel(
         return _uiState.value.dangerZones.ifEmpty {
             geofenceManager?.buildDangerZones(_uiState.value.alerts) ?: emptyList()
         }
+    }
+
+    private fun buildAvoidanceAttempts(zones: List<DangerZone>): List<List<DangerZone>> {
+        val attempts = mutableListOf<List<DangerZone>>()
+
+        fun addAttempt(candidate: List<DangerZone>) {
+            val ids = candidate.map { it.id }.sorted()
+            if (attempts.none { it.map { zone -> zone.id }.sorted() == ids }) {
+                attempts.add(candidate)
+            }
+        }
+
+        val sortedAll = sortZonesByPriority(zones)
+        val groupedAndCritical = sortZonesByPriority(
+            zones.filter { it.grouped || zoneMaxSeverity(it) == Severity.CRITICAL }
+        )
+        val groupedOnly = sortZonesByPriority(zones.filter { it.grouped })
+
+        addAttempt(sortedAll)
+        addAttempt(groupedAndCritical)
+        addAttempt(groupedOnly)
+        addAttempt(emptyList())
+
+        return attempts
+    }
+
+    private fun zoneIdsContainingPoint(
+        point: DeviceCoordinates,
+        zones: List<DangerZone>
+    ): Set<String> {
+        return zones
+            .filter { zone ->
+                val results = FloatArray(1)
+                Location.distanceBetween(
+                    point.latitude,
+                    point.longitude,
+                    zone.centerLatitude,
+                    zone.centerLongitude,
+                    results
+                )
+                results[0] <= zone.radiusMeters
+            }
+            .map { it.id }
+            .toSet()
+    }
+
+    private fun sortZonesByPriority(zones: List<DangerZone>): List<DangerZone> {
+        return zones.sortedWith(
+            compareByDescending<DangerZone> { it.grouped }
+                .thenByDescending { severityWeight(zoneMaxSeverity(it)) }
+                .thenByDescending { it.reportCount }
+                .thenByDescending { it.radiusMeters }
+        )
+    }
+
+    private fun zoneMaxSeverity(zone: DangerZone): Severity {
+        return zone.reports.maxByOrNull { severityWeight(it.severity) }?.severity ?: Severity.WARNING
+    }
+
+    private fun severityWeight(severity: Severity): Int {
+        return when (severity) {
+            Severity.CRITICAL -> 3
+            Severity.WARNING -> 2
+            Severity.SAFE -> 1
+        }
+    }
+
+    private fun countTouchedZonesOnRoute(route: List<DeviceCoordinates>, zones: List<DangerZone>): Int {
+        return touchedZonesOnRoute(route, zones).size
+    }
+
+    private fun touchedZonesOnRoute(route: List<DeviceCoordinates>, zones: List<DangerZone>): List<DangerZone> {
+        return zones.filter { zone ->
+            route.any { point ->
+                val results = FloatArray(1)
+                Location.distanceBetween(
+                    point.latitude,
+                    point.longitude,
+                    zone.centerLatitude,
+                    zone.centerLongitude,
+                    results
+                )
+                results[0] <= zone.radiusMeters
+            }
+        }
+    }
+
+    private fun buildRouteCandidate(
+        result: com.apeligrate.util.SafeRouteResult,
+        riskZones: List<DangerZone>,
+        attemptIndex: Int
+    ): RouteCandidate {
+        val touchedZones = touchedZonesOnRoute(result.points, riskZones)
+        val riskScore = touchedZones.sumOf { zoneRiskWeight(it) }
+        return RouteCandidate(
+            result = result,
+            touchedZoneCount = touchedZones.size,
+            totalRiskScore = riskScore,
+            attemptIndex = attemptIndex
+        )
+    }
+
+    private fun selectBestCandidate(candidates: List<RouteCandidate>): RouteCandidate? {
+        return candidates.minWithOrNull(
+            compareBy<RouteCandidate> { it.touchedZoneCount }
+                .thenBy { it.totalRiskScore }
+                .thenBy { it.result.distanceMeters }
+                .thenBy { it.result.durationSeconds }
+                .thenBy { it.attemptIndex }
+        )
+    }
+
+    private fun zoneRiskWeight(zone: DangerZone): Int {
+        val groupedPenalty = if (zone.grouped) 1000 else 0
+        val severityPenalty = severityWeight(zoneMaxSeverity(zone)) * 100
+        val reportsPenalty = zone.reportCount
+        return groupedPenalty + severityPenalty + reportsPenalty
     }
 
     fun clearRoute() {

@@ -14,12 +14,13 @@ object DangerZoneAggregator {
     private const val MAX_GROUP_RADIUS_METERS = 260f
 
     fun buildDangerZones(alerts: List<Alert>): List<DangerZone> {
-        val criticalReports = alerts
-            .filter { it.severity == Severity.CRITICAL && it.latitude != null && it.longitude != null }
+        // Ahora incluimos todos los reportes con coordenadas para que tengan área visual
+        val validReports = alerts
+            .filter { it.latitude != null && it.longitude != null }
 
-        if (criticalReports.isEmpty()) return emptyList()
+        if (validReports.isEmpty()) return emptyList()
 
-        val clusters = clusterReports(criticalReports)
+        val clusters = clusterReports(validReports)
         val zones = mutableListOf<DangerZone>()
 
         clusters.forEach { cluster ->

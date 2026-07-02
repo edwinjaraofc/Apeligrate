@@ -38,6 +38,11 @@ import coil.compose.AsyncImage
 import com.apeligrate.data.local.DeviceCoordinates
 import com.apeligrate.data.local.DeviceLocationProvider
 import com.apeligrate.data.local.SessionManager
+import com.apeligrate.domain.model.Alert
+import com.apeligrate.domain.model.DangerZone
+import com.apeligrate.domain.model.Severity
+import com.apeligrate.domain.model.IncidentReport
+import com.apeligrate.domain.model.isCritical
 import com.apeligrate.domain.repository.IncidentReportRepository
 import com.apeligrate.domain.repository.UserProgressRepository
 import com.apeligrate.domain.use_case.SubmitIncidentReportUseCase
@@ -48,6 +53,7 @@ import com.apeligrate.ui.theme.PrimaryContainer
 import com.apeligrate.ui.theme.Secondary
 import com.apeligrate.ui.theme.Tertiary
 import com.apeligrate.ui.viewmodel.ReportViewModel
+import com.apeligrate.util.DangerZoneAggregator
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -73,6 +79,44 @@ fun ReportScreen(
 
     val uiState by reportViewModel.uiState.collectAsState()
     val scrollState = rememberScrollState()
+
+    // Lógica para previsualizar el indicador y su área en el mapa del reporte
+    val previewReport = remember(uiState.pickedLocation, uiState.category) {
+        uiState.pickedLocation?.let { loc ->
+            IncidentReport(
+                category = uiState.category.ifEmpty { "Nuevo Reporte" },
+                description = "",
+                latitude = loc.latitude,
+                longitude = loc.longitude,
+                status = if (uiState.category.isCritical()) "critical" else "warning"
+            )
+        }
+    }
+
+    val previewZones = remember(previewReport) {
+        previewReport?.let { report ->
+            listOf(
+                DangerZone(
+                    id = "preview",
+                    centerLatitude = report.latitude!!,
+                    centerLongitude = report.longitude!!,
+                    radiusMeters = DangerZoneAggregator.DEFAULT_ZONE_RADIUS_METERS,
+                    reports = listOf(
+                        Alert(
+                            id = "preview_alert",
+                            title = report.category,
+                            description = "",
+                            severity = if (report.category.isCritical()) Severity.CRITICAL else Severity.WARNING,
+                            timestamp = System.currentTimeMillis(),
+                            latitude = report.latitude,
+                            longitude = report.longitude
+                        )
+                    ),
+                    grouped = false
+                )
+            )
+        } ?: emptyList()
+    }
 
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -170,6 +214,8 @@ fun ReportScreen(
         Spacer(modifier = Modifier.height(12.dp))
         SentinelMapPanel(
             centerCoordinates = uiState.pickedLocation ?: deviceCoordinates,
+            reportMarkers = if (previewReport != null) listOf(previewReport) else emptyList(),
+            dangerZones = previewZones,
             title = if (uiState.pickedLocation != null) "Ubicación seleccionada" else "Tu ubicación actual",
             subtitle = "Presiona en el mapa para marcar el lugar exacto.",
             isPickerMode = true,
