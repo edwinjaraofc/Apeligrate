@@ -235,10 +235,16 @@ class MainActivity : ComponentActivity() {
                                                     onBack = { detailReport = null },
                                                     onShowOnMap = {
                                                         if (detailReport!!.latitude != null && detailReport!!.longitude != null) {
-                                                            mainViewModel.calculateRoute(
-                                                                DeviceCoordinates(detailReport!!.latitude!!, detailReport!!.longitude!!)
+                                                            val reportLocation = DeviceCoordinates(
+                                                                detailReport!!.latitude!!,
+                                                                detailReport!!.longitude!!
+                                                            )
+                                                            mainViewModel.setDestination(
+                                                                reportLocation.latitude,
+                                                                reportLocation.longitude
                                                             )
                                                             selectedTab = SentinelTab.INICIO
+                                                            selectedDrawerTab = DrawerTab.NONE
                                                             detailReport = null
                                                         }
                                                     }
